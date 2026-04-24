@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Noni's Card House — Saturday Night Chaos</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Luckiest+Guy&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="src/styles.css" />
+</head>
+<body>
+  <div id="root"></div>
+
+  <!-- React 18 -->
+  <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <!-- Runtime config -->
+  <script src="src/config.js"></script>
+
+  <!-- Engine (pure logic) -->
+  <script src="src/engine.js"></script>
+
+  <!-- AI bots (required before gameState.jsx) -->
+  <script src="src/adapters/botAdapter.js"></script>
+
+  <!-- Adapter stub -->
+  <script src="src/adapters/dbAdapter.js"></script>
+
+  <!-- Data (seed/static) -->
+  <script src="src/data.jsx" type="text/jsx"></script>
+
+  <!-- Components (UI primitives) -->
+  <script src="src/components.jsx" type="text/jsx"></script>
+
+  <!-- State management (React context + engine integration) -->
+  <script src="src/state/gameState.jsx" type="text/jsx"></script>
+
+  <!-- Screens -->
+  <script src="src/lobby.jsx" type="text/jsx"></script>
+  <script src="src/room.jsx" type="text/jsx"></script>
+  <script src="src/game.jsx" type="text/jsx"></script>
+  <script src="src/extras.jsx" type="text/jsx"></script>
+
+  <!-- App shell (router + topbar) -->
+  <script src="src/app.jsx" type="text/jsx"></script>
+
+  <!-- Mount -->
+  <script type="text/jsx">
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>

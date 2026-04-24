@@ -1,0 +1,12 @@
+{
+  "cleanUrls": false,
+  "rewrites": [
+    { "source": "/", "destination": "/Noni's Card House.html" }
+  ],
+  "headers": [
+    {
+      "source": "**/*.jsx",
+      "headers": [{ "key": "Content-Type", "value": "text/javascript" }]
+    }
+  ]
+}

@@ -1,0 +1,26 @@
+{
+  "name": "nonis-card-house",
+  "version": "0.1.0",
+  "description": "A chunky, cartoon-styled card game prototype",
+  "private": true,
+  "scripts": {
+    "dev": "npx serve . -p 3000 -L",
+    "start": "npx serve . -p 3000 -L",
+    "dev:api": "node server/index.js",
+    "db:migrate": "node server/scripts/migrate.js",
+    "test": "npx serve . -p 3001 -L & sleep 1 && echo 'Open http://localhost:3001/test/engine.test.html'",
+    "test:open": "npx serve . -p 3001 -o /test/engine.test.html -L"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^17.2.3",
+    "express": "^5.1.0",
+    "pg": "^8.16.3"
+  },
+  "devDependencies": {
+    "serve": "^14.2.1"
+  },
+  "engines": {
+    "node": ">=16"
+  }
+}

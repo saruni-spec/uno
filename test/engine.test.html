@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Engine Tests — Noni's Card House</title>
+  <style>
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      max-width: 800px;
+      margin: 40px auto;
+      padding: 20px;
+      background: #120a2a;
+      color: #fff6e6;
+    }
+    h1 { color: #ffc93c; }
+    .test-suite { margin: 20px 0; }
+    .test { padding: 8px 12px; margin: 4px 0; border-radius: 6px; }
+    .pass { background: #3ddc84; color: #120a2a; }
+    .fail { background: #ff4d6d; color: #fff; }
+    .summary { margin-top: 20px; padding: 16px; border-radius: 8px; font-weight: bold; }
+    .summary.all-pass { background: #3ddc84; color: #120a2a; }
+    .summary.has-fail { background: #ff4d6d; color: #fff; }
+    pre { background: rgba(0,0,0,0.3); padding: 8px; border-radius: 4px; overflow-x: auto; }
+  </style>
+</head>
+<body>
+  <h1>🧪 Engine Tests</h1>
+  <div id="results"></div>
+
+  <script src="../src/engine.js"></script>
+  <script>
+    const results = [];
+
+    function test(name, fn) {
+      try {
+        fn();
+        results.push({ name, pass: true });
+      } catch (e) {
+        results.push({ name, pass: false, error: e.message });
+        console.error(`FAIL: ${name}`, e);
+      }
+    }
+
+    function assertEqual(actual, expected, msg) {
+      if (actual !== expected) {
+        throw new Error(`${msg || 'Assertion failed'}: expected ${expected}, got ${actual}`);
+      }
+    }
+
+    function assertTrue(value, msg) {
+      if (!value) throw new Error(msg || 'Expected true, got false');
+    }
+
+    function assertFalse(value, msg) {
+      if (value) throw new Error(msg || 'Expected false, got true');
+    }
+
+    // Test Suite
+    test('Engine exists', () => {
+      assertTrue(typeof Engine !== 'undefined', 'Engine should be defined');
+      assertTrue(typeof Engine.createDeck === 'function', 'createDeck should be a function');
+    });
+
+    test('Standard deck has 108 cards', () => {
+      const deck = Engine.createDeck();
+      assertEqual(deck.length, 108, 'Standard deck size');
+    });
+
+    test('Custom cards increase deck size', () => {
+      const custom = [
+        { id: 'c1', name: 'Swap', emoji: '🔀', color: 'wild', effect: 'Swap hands' },
+      ];
+      const deck = Engine.createDeck(custom);
+      assertEqual(deck.length, 109, 'Deck with custom cards');
+    });
+
+    test('Shuffle preserves card count', () => {
+      const deck = Engine.createDeck();
+      const shuffled = Engine.shuffle(deck);
+      assertEqual(shuffled.length, 108, 'Shuffled deck size');
+      assertEqual(shuffled.length, deck.length, 'Same count after shuffle');
+    });
+
+    test('Shuffle changes order (usually)', () => {
+      const deck = Engine.createDeck();
+      const shuffled = Engine.shuffle(deck);
+      // Check that at least some cards moved (extremely unlikely to be identical)
+      let differences = 0;
+      for (let i = 0; i < deck.length; i++) {
+        if (deck[i].id !== shuffled[i].id) differences++;
+      }
+      assertTrue(differences > 50, 'Shuffle should change order significantly');
+    });
+
+    test('Deal distributes correct cards', () => {
+      const deck = Engine.shuffle(Engine.createDeck());
+      const { hands, remainingDeck } = Engine.deal(deck, 4, 7);
+      
+      assertEqual(hands.length, 4, '4 players get hands');
+      assertEqual(hands[0].length, 7, 'Each gets 7 cards');
+      assertEqual(hands[1].length, 7, 'Each gets 7 cards');
+      assertEqual(hands[2].length, 7, 'Each gets 7 cards');
+      assertEqual(hands[3].length, 7, 'Each gets 7 cards');
+      assertEqual(remainingDeck.length, 108 - 28, 'Remaining deck');
+    });
+
+    test('canPlay - matching color', () => {
+      const top = { color: 'red', value: '5' };
+      const card = { color: 'red', value: '7' };
+      assertTrue(Engine.canPlay(card, top, 'red'), 'Same color should play');
+    });
+
+    test('canPlay - matching number', () => {
+      const top = { color: 'red', value: '7' };
+      const card = { color: 'blue', value: '7' };
+      assertTrue(Engine.canPlay(card, top, 'red'), 'Same number should play');
+    });
+
+    test('canPlay - wild card', () => {
+      const top = { color: 'red', value: '5' };
+      const wild = { color: 'wild', value: 'wild' };
+      assertTrue(Engine.canPlay(wild, top, 'red'), 'Wild should always play');
+    });
+
+    test('canPlay - mismatch', () => {
+      const top = { color: 'red', value: '5' };
+      const card = { color: 'blue', value: '7' };
+      assertFalse(Engine.canPlay(card, top, 'red'), 'Mismatch should not play');
+    });
+
+    test('nextPlayerIndex - clockwise', () => {
+      assertEqual(Engine.nextPlayerIndex(0, 4, 'cw'), 1, 'Next from 0');
+      assertEqual(Engine.nextPlayerIndex(3, 4, 'cw'), 0, 'Wrap around');
+    });
+
+    test('nextPlayerIndex - counter-clockwise', () => {
+      assertEqual(Engine.nextPlayerIndex(1, 4, 'ccw'), 0, 'Prev from 1');
+      assertEqual(Engine.nextPlayerIndex(0, 4, 'ccw'), 3, 'Wrap around backward');
+    });
+
+    test('calculateScore - number cards', () => {
+      const hand = [
+        { color: 'red', value: '5' },
+        { color: 'blue', value: '3' },
+      ];
+      assertEqual(Engine.calculateScore(hand), 8, '5 + 3 = 8');
+    });
+
+    test('calculateScore - action cards', () => {
+      const hand = [
+        { color: 'red', value: 'skip' },
+        { color: 'blue', value: 'reverse' },
+        { color: 'green', value: 'draw2' },
+      ];
+      assertEqual(Engine.calculateScore(hand), 60, '3 × 20 = 60');
+    });
+
+    test('calculateScore - wild cards', () => {
+      const hand = [
+        { color: 'wild', value: 'wild' },
+        { color: 'wild', value: 'wild4' },
+      ];
+      assertEqual(Engine.calculateScore(hand), 100, '2 × 50 = 100');
+    });
+
+    test('initGame creates valid game state', () => {
+      const roomConfig = {
+        roomId: 'test-123',
+        players: [
+          { id: 'p1', name: 'Alice', avatar: { emoji: '🦊', color: '#ff3c7a' }, team: 'A' },
+          { id: 'p2', name: 'Bob', avatar: { emoji: '🐲', color: '#3ddc84' }, team: 'B' },
+        ],
+        rules: { stack: true, noSpecialFinish: true },
+        mode: 'solo',
+      };
+      
+      const game = Engine.initGame(roomConfig);
+      
+      assertTrue(game.gameId, 'Game has ID');
+      assertEqual(game.players.length, 2, '2 players');
+      assertEqual(game.players[0].hand.length, 7, 'Player 1 has 7 cards');
+      assertEqual(game.players[1].hand.length, 7, 'Player 2 has 7 cards');
+      assertTrue(game.topCard, 'Has top card');
+      assertTrue(!['skip', 'reverse', 'draw2', 'wild', 'wild4'].includes(game.topCard.value), 'Top card is not action/wild');
+      assertEqual(game.phase, 'playing', 'Game is playing');
+      assertEqual(game.direction, 'cw', 'Direction is clockwise');
+    });
+
+    test('playCard - valid play removes card', () => {
+      const roomConfig = {
+        roomId: 'test-123',
+        players: [
+          { id: 'p1', name: 'Alice', avatar: { emoji: '🦊', color: '#ff3c7a' } },
+          { id: 'p2', name: 'Bob', avatar: { emoji: '🐲', color: '#3ddc84' } },
+        ],
+        rules: {},
+      };
+      
+      const game = Engine.initGame(roomConfig);
+      const playerId = game.players[0].id;
+      const cardToPlay = game.players[0].hand[0];
+      
+      // Force the top card to match the first card in hand so it can be played
+      game.topCard = { color: cardToPlay.color, value: '0' };
+      
+      const result = Engine.playCard(game, playerId, cardToPlay.id);
+      
+      assertTrue(result.success, 'Play should succeed');
+      assertEqual(result.gameState.players[0].hand.length, 6, 'Hand now has 6 cards');
+      assertEqual(result.gameState.topCard.id, cardToPlay.id, 'Top card is the played card');
+    });
+
+    test('checkWinner - empty hand wins', () => {
+      const roomConfig = {
+        roomId: 'test-123',
+        players: [
+          { id: 'p1', name: 'Alice', avatar: { emoji: '🦊', color: '#ff3c7a' } },
+        ],
+        rules: {},
+      };
+      
+      const game = Engine.initGame(roomConfig);
+      game.players[0].hand = [];
+      game.topCard = { color: 'red', value: '5' }; // Non-action card
+      
+      const result = Engine.checkWinner(game, 'p1');
+      assertTrue(result.isWinner, 'Empty hand should win');
+    });
+
+    test('checkWinner - noSpecialFinish blocks action win', () => {
+      const roomConfig = {
+        roomId: 'test-123',
+        players: [
+          { id: 'p1', name: 'Alice', avatar: { emoji: '🦊', color: '#ff3c7a' } },
+        ],
+        rules: { noSpecialFinish: true },
+      };
+      
+      const game = Engine.initGame(roomConfig);
+      game.players[0].hand = [];
+      game.topCard = { color: 'red', value: 'skip' }; // Action card
+      
+      const result = Engine.checkWinner(game, 'p1');
+      assertFalse(result.isWinner, 'Should not win on action card');
+      assertEqual(result.reason, 'Cannot win on special card', 'Correct reason');
+    });
+
+    // Render results
+    const container = document.getElementById('results');
+    let passCount = 0;
+    let failCount = 0;
+
+    results.forEach(r => {
+      const div = document.createElement('div');
+      div.className = `test ${r.pass ? 'pass' : 'fail'}`;
+      div.textContent = `${r.pass ? '✓' : '✗'} ${r.name}${r.error ? `: ${r.error}` : ''}`;
+      container.appendChild(div);
+      if (r.pass) passCount++; else failCount++;
+    });
+
+    const summary = document.createElement('div');
+    summary.className = `summary ${failCount === 0 ? 'all-pass' : 'has-fail'}`;
+    summary.textContent = `${passCount} passed, ${failCount} failed (${results.length} total)`;
+    container.appendChild(summary);
+
+    console.log(`Tests complete: ${passCount}/${results.length}`);
+  </script>
+</body>
+</html>
