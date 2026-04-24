@@ -133,15 +133,22 @@ export function RoomSetupScreen({ roomId }: { roomId: string }) {
     (async () => {
       try {
         await ensureSession();
+        // Join first (ensures membership before getRoom, which may require it).
+        // Use "A" as the initial placeholder team — we'll correct it below.
+        try { await joinRoom(roomId, { team: "A" }); } catch { /* already a member */ }
         const room = await getRoom(roomId);
         if (!cancelled) {
           setServerRoom(room);
           const n = room.players?.length ?? room.playerCount ?? 0;
           setRoomMemberCount(typeof n === "number" ? n : 0);
-          // Auto-join with a balanced team assignment
-          const existingTeams = (room.players ?? []).map((p: any) => ({ team: p.team || "A" } as PlayerDraft));
-          const autoTeam = pickTeam(existingTeams);
-          try { await joinRoom(roomId, { team: autoTeam }); } catch { /* already member */ }
+          // Compute a balanced team from the OTHER players already in the room
+          // (exclude "me" — they just joined, their team doesn't matter for balancing yet)
+          const session = await ensureSession();
+          const othersTeams = (room.players ?? [])
+            .filter((p: any) => p.id !== session.id)
+            .map((p: any) => ({ team: p.team || "A" } as PlayerDraft));
+          const smartTeam = pickTeam(othersTeams);
+          setPlayers((prev) => prev.map((p) => (p.id === "me" ? { ...p, team: smartTeam } : p)));
         }
       } catch {
         if (!cancelled) {
