@@ -1,6 +1,8 @@
 # Implementation Plan — Game Engine & Multiplayer
 
 > **Goal:** Enable real gameplay with multiplayer sync and temporary scoring, architected for easy database/Redis integration later.
+>
+> **Related roadmap:** See `NEXTJS_REWRITE_PLAN.md` for the staged migration plan to Next.js.
 
 ---
 

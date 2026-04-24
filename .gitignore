@@ -17,6 +17,8 @@ dist/
 build/
 coverage/
 .cache/
+.next/
+out/
 
 # OS/editor files
 .DS_Store

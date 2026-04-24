@@ -41,56 +41,69 @@ Backend identity is now session-based:
 - Frontend stores it in `localStorage` as `shout.user` and sends it as `x-user-id`.
 - `POST /api/bootstrap/seed` creates initial users/room/custom cards when the database is empty.
 
+## Docker Quick Start
+
+```bash
+# Build and start postgres + api + web
+docker compose up --build
+```
+
+Services:
+
+- Frontend: `http://localhost:3000`
+- API: `http://localhost:4000/api`
+- Postgres: `localhost:5432` (`postgres/postgres`, db: `nonis_card_house`)
+
+Notes:
+
+- Migrations run automatically when `api` starts.
+- Frontend backend mode can still be toggled with `?backend=1` or localStorage.
+- To stop and remove containers: `docker compose down`
+- To also clear DB data: `docker compose down -v`
+
 ## Scripts
 
 | Command | Description |
 |---------|-------------|
-| `npm run dev` / `npm start` | Start dev server on port 3000 |
+| `npm run dev` / `npm start` | Start Next.js app on port 3002 |
 | `npm run dev:api` | Start Express API on port 4000 |
 | `npm run db:migrate` | Apply PostgreSQL schema migrations |
-| `npm test` | Start test server on port 3001 (prints URL) |
-| `npm run test:open` | Start test server and auto-open browser |
+| `npm test` | Run Vitest engine tests |
+| `npm run qa:migration` | Run migration smoke checklist (API/WS) |
 
 ## Project Structure
 
 ```
-Noni's Card House.html    # Entry point — open directly or via dev server
-src/
-  engine.js               # Pure game logic (no React deps)
-  state/gameState.jsx     # React context + engine integration
-  adapters/dbAdapter.js   # No-op stub for future API
-  components.jsx          # UI primitives
-  game.jsx                # Game table screen
-  lobby.jsx               # Room lobby
-  room.jsx                # Room setup
-  data.jsx                # Seed data
-  app.jsx                 # App shell + routing
-  styles.css              # All styling
-test/
-  engine.test.html        # Engine unit tests (browser-based)
+app/                      # Next.js routes
+components/next/          # Next client components
+lib/engine/               # Typed engine modules + tests
+lib/api/                  # Typed API client
+server/                   # Express API + websocket realtime
+src/engine.js             # Runtime engine used by server routes
+src/styles.css            # Shared visual styles
+scripts/migration-qa.mjs  # End-to-end migration smoke script
 ```
 
 ## How It Works
 
-This is a **client-side only** prototype — no build step required.
+This is now a Next.js + Express application with Postgres-backed APIs.
 
-- React 18 + Babel standalone compile JSX in the browser
-- `src/engine.js` is pure JavaScript with no dependencies
-- `src/state/gameState.jsx` bridges engine → React via Context API
-- localStorage persists match state between refreshes
+- Next App Router renders all core screens
+- Express handles auth, room lifecycle, moves, history, and custom cards
+- WebSocket channel broadcasts authoritative room-state updates
+- localStorage keeps session and active-match resume snapshots
 
 ## Testing
 
-### Engine Tests (Browser)
+### Engine Tests
 ```bash
-npm run test:open
-# or manually: open http://localhost:3001/test/engine.test.html
+npm test
 ```
 
 ### Manual Testing
-1. `npm run dev`
-2. Click "▶ Play" from nav or go to Room → Start Game
-3. Play cards, draw, verify turn rotation
+1. `npm run dev:api`
+2. `npm run dev`
+3. Create/join a room, start game, and verify moves sync
 
 ## Browser Compatibility
 
@@ -100,13 +113,11 @@ npm run test:open
 
 ## Troubleshooting
 
-**Blank page?** Check browser console for JSX compilation errors. Files must load in order:
-1. `engine.js`
-2. `adapters/dbAdapter.js`
-3. `data.jsx`
-4. `components.jsx`
-5. `state/gameState.jsx`
-6. Screens (`game.jsx`, etc.)
+**Backend not reachable?** Check:
+1. `DATABASE_URL` in `.env`
+2. `npm run db:migrate` ran successfully
+3. API started (`npm run dev:api`)
+4. Next env points to API (`NEXT_PUBLIC_API_BASE_URL`)
 7. `app.jsx`
 
 **Tests failing?** Make sure you're viewing `test/engine.test.html` through the server (not `file://` protocol) due to module loading.

@@ -1,6 +1,6 @@
 # Noni's Card House 🏠🃏
 
-A chunky, cartoon-styled card game prototype inspired by classic shedding-card games (Crazy Eights / UNO family). Built as an interactive HTML prototype with React + Babel.
+A chunky, cartoon-styled card game prototype inspired by classic shedding-card games (Crazy Eights / UNO family), now migrated to Next.js + Node/Express + Postgres.
 
 > **Note on branding:** this is an original design. Gameplay takes inspiration from the shedding-card genre but the name, visuals, card art, and all copy are original to this project.
 
@@ -8,17 +8,15 @@ A chunky, cartoon-styled card game prototype inspired by classic shedding-card g
 
 ## 📁 File map
 
-| Path                     | Purpose                                                                     |
-| ------------------------ | --------------------------------------------------------------------------- |
-| `Noni's Card House.html` | Entry point — loads fonts, React, Babel, and all JSX modules                |
-| `src/styles.css`         | All styling — colors, cards, tables, panels, animations                     |
-| `src/data.jsx`           | Seed data — rooms, players, house rules, leaderboard, history, custom cards |
-| `src/components.jsx`     | Reusable primitives — `Card`, `Avatar`, `Switch`, `Sticker`, `Confetti`     |
-| `src/lobby.jsx`          | Lobby screen (room list + hero + create room)                               |
-| `src/room.jsx`           | Room setup screen (personalization, teams, rules, invite modal)             |
-| `src/game.jsx`           | Live game table (hand, opponents, deck/discard, wild picker, chat)          |
-| `src/extras.jsx`         | Custom card creator + stats/leaderboard/history                             |
-| `src/app.jsx`            | App shell — screen routing, topbar, Tweaks panel                            |
+| Path                   | Purpose                                        |
+| ---------------------- | ---------------------------------------------- |
+| `app/`                 | Next.js App Router pages                        |
+| `components/next/`     | Next.js client UI components                    |
+| `lib/engine/`          | Typed engine + tests                            |
+| `lib/api/`             | Typed API client + config                       |
+| `server/`              | Express API + auth + realtime websocket         |
+| `src/engine.js`        | Legacy-compatible runtime engine used by server |
+| `src/styles.css`       | Shared visual styles                            |
 
 ---
 
@@ -120,32 +118,27 @@ Defaults are persisted in an `EDITMODE` JSON block so changes survive reload.
 
 ## 🛠 How to run / iterate
 
-### Quick (no build)
-
-Open `Noni's Card House.html` directly in browser — everything is client-side.
-
-### Local dev server (recommended)
+### Local development
 
 ```bash
 npm install   # one-time setup
-npm run dev   # starts server at http://localhost:3000
+npm run dev:api   # API at http://localhost:4000
+npm run dev       # Next app at http://localhost:3002
 ```
 
 To edit:
 
 - Styling → `src/styles.css`
-- Seed data → `src/data.jsx`
-- Game logic → `src/engine.js`
-- State management → `src/state/gameState.jsx`
-- Screens → their `.jsx` files in `src/`
+- Engine logic → `lib/engine/` and `src/engine.js`
+- Next screens → `app/` + `components/next/`
+- API routes → `server/routes.js`
 
-Screen state is persisted in `localStorage` under `shout.screen`.
+Client session and match snapshots are persisted in `localStorage`.
 
 ### Testing
 
 ```bash
-npm test              # prints test URL
-npm run test:open     # auto-opens browser to engine tests
+npm test
 ```
 
 ---
@@ -154,14 +147,22 @@ npm run test:open     # auto-opens browser to engine tests
 
 **Is:** a playable card game with real engine (deck, turns, rules, scoring), high-fidelity UI, and match persistence.
 
-**Isn't:** networked multiplayer yet. Games run locally with engine-driven state; server sync (WebSockets / WebRTC) is the next step.
+**Isn't:** fully production-hardened internet scale multiplayer yet (Redis-backed fanout, presence analytics, and failover are follow-up work).
 
 ---
 
 ## 🔜 Next steps
 
-- WebRTC / WebSocket transport for multiplayer (wifi + internet rooms)
+- Redis-backed pub/sub fanout for multi-instance realtime
 - Persistent profile & leaderboard backend
 - Mobile layout pass (cards scale, bottom sheet for chat)
 - Sound pack + haptics
 - Animated card deal / play transitions
+
+---
+
+## 📚 Planning docs
+
+- `IMPLEMENTATION_PLAN.md` — current implementation roadmap and status
+- `NEXTJS_REWRITE_PLAN.md` — staged migration plan to Next.js
+- `MIGRATION_QA_CHECKLIST.md` — go-live validation checklist

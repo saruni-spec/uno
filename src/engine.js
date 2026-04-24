@@ -32,6 +32,7 @@ function generateCardId() {
 }
 
 const Engine = {
+  CARD_POINTS,
   // Create a standard UNO deck (108 cards)
   createDeck(customCards = []) {
     const deck = [];
@@ -163,7 +164,6 @@ const Engine = {
         break;
 
       case "wild":
-      case "wild4":
         // Wild color change handled by caller (needs player input)
         break;
 
@@ -287,11 +287,13 @@ const Engine = {
 
       if (!canStack) {
         // Apply the draw
-        const { drawnCards, newDeck } = this.drawMultiple(
+        const { drawnCards, newDeck, newDiscardPile } = this.drawMultiple(
           newState.deck,
           newState.pendingDraw,
+          newState.discardPile,
         );
         newState.deck = newDeck;
+        newState.discardPile = newDiscardPile;
         newState.players = newState.players.map((p, i) => {
           if (i !== newState.currentPlayerIndex) return p;
           return { ...p, hand: [...p.hand, ...drawnCards] };
@@ -311,13 +313,26 @@ const Engine = {
   },
 
   // Draw multiple cards from deck
-  drawMultiple(deck, count) {
-    const drawn = deck.slice(0, count);
-    const newDeck = deck.slice(count);
+  drawMultiple(deck, count, discardPile = []) {
+    let workingDeck = [...deck];
+    let workingDiscard = [...discardPile];
+    const drawn = [];
 
-    // If deck runs low, we should reshuffle discard (simplified here)
-    // For now, just return what we have
-    return { drawnCards: drawn, newDeck };
+    while (drawn.length < count) {
+      if (workingDeck.length === 0) {
+        if (workingDiscard.length === 0) break;
+        workingDeck = this.shuffle(workingDiscard);
+        workingDiscard = [];
+      }
+      drawn.push(workingDeck.shift());
+    }
+
+    return {
+      drawnCards: drawn,
+      newDeck: workingDeck,
+      newDiscardPile: workingDiscard,
+      shortBy: Math.max(0, count - drawn.length),
+    };
   },
 
   // Draw a single card
@@ -336,10 +351,15 @@ const Engine = {
     // and losing the turn (unless auto-continue flow is explicitly used).
     if ((gameState.pendingDraw || 0) > 0 && !autoContinue) {
       const penalty = gameState.pendingDraw;
-      const { drawnCards, newDeck } = this.drawMultiple(gameState.deck, penalty);
+      const { drawnCards, newDeck, newDiscardPile } = this.drawMultiple(
+        gameState.deck,
+        penalty,
+        gameState.discardPile,
+      );
       let newState = {
         ...gameState,
         deck: newDeck,
+        discardPile: newDiscardPile,
         players: gameState.players.map((p, i) => {
           if (i !== playerIndex) return p;
           return { ...p, hand: [...p.hand, ...drawnCards] };
@@ -360,25 +380,17 @@ const Engine = {
       };
     }
 
-    if (gameState.deck.length === 0) {
-      // Reshuffle discard pile (except top card)
-      if (gameState.discardPile.length <= 1) {
-        return { success: false, error: "No cards to draw" };
-      }
-      const newDeck = this.shuffle(gameState.discardPile.slice(0, -1));
-      gameState = {
-        ...gameState,
-        deck: newDeck,
-        discardPile: [gameState.discardPile[gameState.discardPile.length - 1]],
-      };
+    const drawResult = this.drawMultiple(gameState.deck, 1, gameState.discardPile);
+    if (drawResult.drawnCards.length === 0) {
+      return { success: false, error: "No cards to draw" };
     }
-
-    const card = gameState.deck[0];
-    const newDeck = gameState.deck.slice(1);
+    const card = drawResult.drawnCards[0];
+    const newDeck = drawResult.newDeck;
 
     let newState = {
       ...gameState,
       deck: newDeck,
+      discardPile: drawResult.newDiscardPile,
       players: gameState.players.map((p, i) => {
         if (i !== playerIndex) return p;
         return { ...p, hand: [...p.hand, card] };
@@ -482,8 +494,13 @@ const Engine = {
     if (validation.isLegal) {
       // Challenge failed - challenger draws 2 + the 4 = 6 total
       const penalty = 6;
-      const { drawnCards, newDeck } = this.drawMultiple(newState.deck, penalty);
+      const { drawnCards, newDeck, newDiscardPile } = this.drawMultiple(
+        newState.deck,
+        penalty,
+        newState.discardPile,
+      );
       newState.deck = newDeck;
+      newState.discardPile = newDiscardPile;
 
       const challengerIndex = newState.players.findIndex(
         (p) => p.id === challengerId,
@@ -501,8 +518,13 @@ const Engine = {
       };
     } else {
       // Challenge succeeded - target draws 4 (the wild4 penalty) instead of next player
-      const { drawnCards, newDeck } = this.drawMultiple(newState.deck, 4);
+      const { drawnCards, newDeck, newDiscardPile } = this.drawMultiple(
+        newState.deck,
+        4,
+        newState.discardPile,
+      );
       newState.deck = newDeck;
+      newState.discardPile = newDiscardPile;
 
       const targetIndex = newState.players.findIndex((p) => p.id === targetId);
       newState.players = newState.players.map((p, i) => {
@@ -627,11 +649,13 @@ const Engine = {
         );
 
       if (!canStack) {
-        const { drawnCards, newDeck } = this.drawMultiple(
+        const { drawnCards, newDeck, newDiscardPile } = this.drawMultiple(
           newState.deck,
           newState.pendingDraw,
+          newState.discardPile,
         );
         newState.deck = newDeck;
+        newState.discardPile = newDiscardPile;
         newState.players = newState.players.map((p, i) => {
           if (i !== newState.currentPlayerIndex) return p;
           return { ...p, hand: [...p.hand, ...drawnCards] };
@@ -684,10 +708,15 @@ const Engine = {
       topCardIndex++;
     }
 
-    const topCard = remainingDeck[topCardIndex];
+    const safeTopIndex =
+      topCardIndex < remainingDeck.length ? topCardIndex : 0;
+    const topCard = remainingDeck[safeTopIndex];
+    if (!topCard) {
+      throw new Error("Failed to initialize game: deck is empty after dealing");
+    }
     const deckAfterFlip = [
-      ...remainingDeck.slice(0, topCardIndex),
-      ...remainingDeck.slice(topCardIndex + 1),
+      ...remainingDeck.slice(0, safeTopIndex),
+      ...remainingDeck.slice(safeTopIndex + 1),
     ];
 
     return {
@@ -696,7 +725,7 @@ const Engine = {
       phase: "playing",
       direction: "cw",
       currentPlayerIndex: 0,
-      currentColor: topCard.color,
+      currentColor: topCard.color === "wild" ? "red" : topCard.color,
       topCard,
       deck: deckAfterFlip,
       discardPile: [],
