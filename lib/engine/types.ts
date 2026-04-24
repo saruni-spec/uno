@@ -32,6 +32,8 @@ export interface Card {
 export interface PlayerState {
   id: string;
   name: string;
+  av?: string;
+  bg?: string;
   team?: string | null;
   hand: Card[];
   cardCount?: number;

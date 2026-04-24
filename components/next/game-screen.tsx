@@ -168,10 +168,13 @@ export function GameScreen({ roomId }: { roomId: string }) {
       roomId,
       (next) => {
         if (!next) return;
-        // Ignore poll results that arrive too soon after a local move — they
-        // carry the pre-move server state and would cause the discard / hand to flicker.
+        // Ignore results that arrive too soon after a local move (pre-move server state).
         if (Date.now() - lastLocalMoveAt.current < POLL_SUPPRESS_MS) return;
-        setGame(next as GameState);
+        const incoming = next as GameState;
+        // Never let a stale "finished" server state overwrite an active local game.
+        // This happens between nextRound() and the server catching up with the new init.
+        if (incoming.phase === "finished" && gameRef.current?.phase === "playing") return;
+        setGame(incoming);
       },
       (status) => {
         if (status === "connected") setSyncStatus("live");
@@ -388,7 +391,8 @@ export function GameScreen({ roomId }: { roomId: string }) {
 
   const nextRound = () => {
     const newGame = Engine.initGame(config);
-    lastLocalMoveAt.current = Date.now();
+    // Suppress polls for 5 s — long enough for the server init to land.
+    lastLocalMoveAt.current = Date.now() + 3200;
     setRound((r) => r + 1);
     setUnoState("idle");
     setGame(newGame);
@@ -520,9 +524,6 @@ export function GameScreen({ roomId }: { roomId: string }) {
 
   if (!game || !current) return null;
 
-  const rawTurnLabel = current.id === meId ? "Your turn" : `${current.name}'s turn`;
-  const turnLabel = rawTurnLabel.length > 20 ? `${rawTurnLabel.slice(0, 18)}…` : rawTurnLabel;
-
   return (
     <div className="table-wrap">
       <div className="table-top-chrome">
@@ -534,9 +535,6 @@ export function GameScreen({ roomId }: { roomId: string }) {
         </span>
         <span className="chip">Round {round}</span>
         <span className="chip">{backendActive ? `sync:${syncStatus}` : "sync:local"}</span>
-        <span className="chip turn-chip" title={current.id === meId ? "Your turn" : `${current.name}'s turn`}>
-          {turnLabel}
-        </span>
       </div>
       <div className="felt">
         <div className="felt-bg felt-neon" />
@@ -545,14 +543,14 @@ export function GameScreen({ roomId }: { roomId: string }) {
             {game.players
               .filter((p) => p.id !== meId)
               .map((p) => (
-                <div key={p.id} className="opponent">
+                <div key={p.id} className={`opponent${p.id === current.id ? " turn" : ""}`}>
                   <div className="op-cards-count">{p.hand.length}</div>
                   <div className="op-hand">
                     {Array.from({ length: Math.min(5, p.hand.length) }).map((_, i) => (
                       <Card key={i} back size="sm" />
                     ))}
                   </div>
-                  <div className="op-name-tag">{p.name}</div>
+                  <div className="op-name-tag">{p.av ?? "🃏"} {p.name}</div>
                 </div>
               ))}
           </div>
@@ -573,7 +571,23 @@ export function GameScreen({ roomId }: { roomId: string }) {
                 </button>
               </div>
             </div>
-            <div className="direction-indicator">{game.direction === "cw" ? "↻" : "↺"}</div>
+
+            {/* Central turn banner */}
+            <div className="turn-banner-col">
+              <div className={`turn-banner${current.id === meId ? " turn-banner--me" : ""}`}>
+                {game.phase === "finished" ? (
+                  <span className="turn-banner-text">🏆 Hand over</span>
+                ) : current.id === meId ? (
+                  <span className="turn-banner-text">Your turn!</span>
+                ) : (
+                  <span className="turn-banner-text">
+                    {current.av ?? "🃏"} {current.name}
+                  </span>
+                )}
+              </div>
+              <div className="direction-indicator">{game.direction === "cw" ? "↻" : "↺"}</div>
+            </div>
+
             <div className="centered-col">
               <div className="chip">
                 Discard
@@ -584,13 +598,6 @@ export function GameScreen({ roomId }: { roomId: string }) {
           </div>
           <div className="player-area">
             <div className="player-bar">
-              <span className="chip ok">
-                {game.phase === "finished"
-                  ? "Hand finished"
-                  : current.id === meId
-                    ? "Your turn"
-                    : `${current.name}'s turn`}
-              </span>
               <span className="chip">Score: {scores[meId] || 0}</span>
               {unoState === "must-shout" ? (
                 <button className="btn uno-btn-shout" onClick={onShoutUno} aria-label="Say UNO">

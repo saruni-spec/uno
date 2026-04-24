@@ -1143,21 +1143,58 @@ body {
 
 .direction-indicator {
   font-family: "Lilita One", cursive;
-  font-size: 64px;
+  font-size: 48px;
   color: var(--accent-2);
-  text-shadow: 4px 4px 0 #0a0418;
+  text-shadow: 3px 3px 0 #0a0418;
   animation: spin-dir 4s linear infinite;
 }
 .direction-indicator.ccw {
   animation-direction: reverse;
 }
 @keyframes spin-dir {
-  0% {
-    transform: rotate(0);
-  }
-  100% {
-    transform: rotate(360deg);
-  }
+  0%   { transform: rotate(0); }
+  100% { transform: rotate(360deg); }
+}
+
+/* Central turn banner — between draw pile and discard */
+.turn-banner-col {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  min-width: 120px;
+}
+.turn-banner {
+  padding: 7px 18px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 2px solid rgba(255, 255, 255, 0.12);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink-dim);
+  white-space: nowrap;
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: background 0.3s, border-color 0.3s, color 0.3s;
+}
+.turn-banner--me {
+  background: var(--accent-2);
+  border-color: var(--accent-2);
+  color: #1a0a2e;
+  font-family: "Lilita One", cursive;
+  font-size: 15px;
+  animation: turn-me-pulse 1s ease-in-out infinite alternate;
+  box-shadow: 0 0 20px rgba(255, 210, 63, 0.55);
+}
+@keyframes turn-me-pulse {
+  from { box-shadow: 0 0 12px rgba(255,210,63,0.4); transform: scale(1); }
+  to   { box-shadow: 0 0 28px rgba(255,210,63,0.8); transform: scale(1.04); }
+}
+.turn-banner-text {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* Player's hand area */
@@ -2559,8 +2596,20 @@ body {
     height: 134px;
   }
   .direction-indicator {
-    font-size: 32px;
+    font-size: 28px;
     text-shadow: 2px 2px 0 #0a0418;
+  }
+  .turn-banner-col {
+    gap: 3px;
+    min-width: 80px;
+  }
+  .turn-banner {
+    font-size: 11px;
+    padding: 4px 10px;
+    max-width: 110px;
+  }
+  .turn-banner--me {
+    font-size: 12px;
   }
   .centered-col .chip {
     font-size: 10px;
