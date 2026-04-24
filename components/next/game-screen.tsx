@@ -387,9 +387,22 @@ export function GameScreen({ roomId }: { roomId: string }) {
   };
 
   const nextRound = () => {
+    const newGame = Engine.initGame(config);
+    lastLocalMoveAt.current = Date.now();
     setRound((r) => r + 1);
     setUnoState("idle");
-    setGame(Engine.initGame(config));
+    setGame(newGame);
+    gameRef.current = newGame;
+    // Push the freshly-seeded game to the server so the next poll returns the
+    // new round rather than the old finished state.
+    if (backendActive) {
+      submitMove(roomId, {
+        type: "init",
+        playerId: meId || "me",
+        roomConfig: config,
+        gameState: newGame,
+      }).catch(() => undefined);
+    }
   };
 
   useEffect(() => {
