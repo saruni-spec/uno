@@ -232,8 +232,14 @@ const Engine = {
       }
     }
 
-    // Check if card is playable
-    if (!this.canPlay(card, topCard, currentColor, gameState.rules)) {
+    // Check if card is playable (stacking +2/+4 ignores wild4's chosen color)
+    const penaltyStackPlay =
+      rules.stack &&
+      (gameState.pendingDraw || 0) > 0 &&
+      (card.value === "draw2" || card.value === "wild4") &&
+      (topCard.value === "draw2" || topCard.value === "wild4");
+
+    if (!penaltyStackPlay && !this.canPlay(card, topCard, currentColor, gameState.rules)) {
       return { success: false, error: "Card cannot be played" };
     }
 
