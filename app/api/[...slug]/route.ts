@@ -108,6 +108,94 @@ async function getRoomPlayersForEngine(
   }));
 }
 
+/** Build a brand-new Engine game from DB room + optional client roomConfig. */
+async function seedFreshGameState(
+  client: any,
+  roomId: string,
+  roomConfig: any,
+  priorFinishedState: any | null,
+): Promise<{ ok: true; state: any } | { ok: false; status: number; body: any }> {
+  let configuredBotNames: Set<string> | undefined;
+  if (Array.isArray(roomConfig?.players)) {
+    const existingPlayerIds = await client.query(`SELECT user_id FROM room_players WHERE room_id = $1`, [roomId]);
+    const existingSet = new Set(existingPlayerIds.rows.map((r: any) => r.user_id));
+    const configBots = (roomConfig.players as any[]).filter((p) => p?.isBot && typeof p.name === "string");
+    configuredBotNames = new Set(configBots.map((b: any) => String(b.name || "").trim()));
+    for (const bot of configBots) {
+      const botName = String(bot.name || "Bot").slice(0, 64);
+      const botAvatar = String(bot.av || "🤖").slice(0, 8);
+      const botColor = String(bot.bg || "#7b5cff").slice(0, 16);
+      const nameExists = await client.query(
+        `SELECT rp.user_id FROM room_players rp
+         JOIN users u ON u.id = rp.user_id
+         WHERE rp.room_id = $1 AND u.username = $2 LIMIT 1`,
+        [roomId, botName],
+      );
+      if (nameExists.rowCount) continue;
+      const createdBot = await client.query(
+        `INSERT INTO users (username, avatar_emoji, avatar_color)
+         VALUES ($1,$2,$3) RETURNING id`,
+        [botName, botAvatar, botColor],
+      );
+      const botId = createdBot.rows[0].id;
+      if (!existingSet.has(botId)) {
+        await client.query(
+          `INSERT INTO room_players (room_id, user_id, team, is_ready, is_host)
+           VALUES ($1,$2,$3,TRUE,FALSE) ON CONFLICT DO NOTHING`,
+          [roomId, botId, bot.team || null],
+        );
+      }
+    }
+  }
+  // Guests often send no roomConfig — recover bot names from the last persisted game.
+  if (priorFinishedState && Array.isArray(priorFinishedState.players)) {
+    for (const p of priorFinishedState.players) {
+      if (p?.isBot && typeof p.name === "string") {
+        if (!configuredBotNames) configuredBotNames = new Set();
+        configuredBotNames.add(String(p.name).trim());
+      }
+    }
+  }
+
+  const players = await getRoomPlayersForEngine(client, roomId, configuredBotNames);
+  if (!players.length) {
+    return { ok: false, status: 404, body: { error: "room not found" } };
+  }
+  if (players.length < 2) {
+    return {
+      ok: false,
+      status: 400,
+      body: {
+        error: "not_enough_players",
+        message: "A game needs at least 2 players. Add an opponent or a bot in Room Setup.",
+      },
+    };
+  }
+  const roomResult = await client.query(
+    `SELECT mode, hand_size, score_target FROM rooms WHERE id = $1 LIMIT 1`,
+    [roomId],
+  );
+  if (!roomResult.rowCount) {
+    return { ok: false, status: 404, body: { error: "room not found" } };
+  }
+  const rulesResult = await client.query(`SELECT rule_id, is_enabled FROM room_rules WHERE room_id = $1`, [roomId]);
+  const rulesFromDb = rulesResult.rows.reduce((acc: Record<string, boolean>, row: any) => {
+    acc[row.rule_id] = Boolean(row.is_enabled);
+    return acc;
+  }, {});
+  const roomRow = roomResult.rows[0];
+  const safeConfig = {
+    roomId,
+    mode: roomConfig?.mode || roomRow.mode || "solo",
+    handSize: Number(roomConfig?.handSize || roomRow.hand_size || 7),
+    targetScore: Number(roomConfig?.targetScore || roomRow.score_target || 500),
+    rules: roomConfig?.rules || rulesFromDb,
+    players,
+  };
+  const state = Engine.initGame(safeConfig);
+  return { ok: true, state };
+}
+
 function json(status: number, body: unknown) {
   return NextResponse.json(body, { status });
 }
@@ -443,87 +531,26 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ slu
       );
       let gameState = gameResult.rowCount ? gameResult.rows[0].state_json : null;
       if (!gameState) {
-        // If the host is starting a room that has only themselves, auto-add any
-        // bot players that were configured in the client UI but never persisted
-        // to the DB (happens when starting from an existing-room URL).
-        let configuredBotNames: Set<string> | undefined;
-        if (type === "init" && Array.isArray(roomConfig?.players)) {
-          const existingPlayerIds = await client.query(
-            `SELECT user_id FROM room_players WHERE room_id = $1`,
-            [roomId],
-          );
-          const existingSet = new Set(existingPlayerIds.rows.map((r: any) => r.user_id));
-          const configBots = (roomConfig.players as any[]).filter(
-            (p) => p?.isBot && typeof p.name === "string",
-          );
-          configuredBotNames = new Set(configBots.map((b: any) => String(b.name || "").trim()));
-          for (const bot of configBots) {
-            const botName = String(bot.name || "Bot").slice(0, 64);
-            const botAvatar = String(bot.av || "🤖").slice(0, 8);
-            const botColor = String(bot.bg || "#7b5cff").slice(0, 16);
-            // Only add if no bot with this name already exists in room to avoid
-            // duplicates on repeated Start Game presses.
-            const nameExists = await client.query(
-              `SELECT rp.user_id FROM room_players rp
-               JOIN users u ON u.id = rp.user_id
-               WHERE rp.room_id = $1 AND u.username = $2 LIMIT 1`,
-              [roomId, botName],
-            );
-            if (nameExists.rowCount) continue;
-            const createdBot = await client.query(
-              `INSERT INTO users (username, avatar_emoji, avatar_color)
-               VALUES ($1,$2,$3) RETURNING id`,
-              [botName, botAvatar, botColor],
-            );
-            const botId = createdBot.rows[0].id;
-            if (!existingSet.has(botId)) {
-              await client.query(
-                `INSERT INTO room_players (room_id, user_id, team, is_ready, is_host)
-                 VALUES ($1,$2,$3,TRUE,FALSE) ON CONFLICT DO NOTHING`,
-                [roomId, botId, bot.team || null],
-              );
-            }
-          }
-        }
-
-        const players = await getRoomPlayersForEngine(client, roomId, configuredBotNames);
-        if (!players.length) {
-          return { status: 404, body: { error: "room not found" } };
-        }
-        if (players.length < 2) {
-          return {
-            status: 400,
-            body: {
-              error: "not_enough_players",
-              message: "A game needs at least 2 players. Add an opponent or a bot in Room Setup.",
-            },
-          };
-        }
-        const roomResult = await client.query(
-          `SELECT mode, hand_size, score_target FROM rooms WHERE id = $1 LIMIT 1`,
-          [roomId],
+        const seeded = await seedFreshGameState(client, roomId, roomConfig, null);
+        if (!seeded.ok) return { status: seeded.status, body: seeded.body };
+        gameState = seeded.state;
+      }
+      // Next hand: a finished game row already exists — must re-deal. Previously the
+      // server skipped init entirely and returned the stale finished state forever.
+      if (type === "init" && gameResult.rowCount && gameState?.phase === "finished") {
+        const prior = gameResult.rows[0].state_json;
+        const seeded = await seedFreshGameState(client, roomId, roomConfig, prior);
+        if (!seeded.ok) return { status: seeded.status, body: seeded.body };
+        const newState = seeded.state;
+        await client.query(
+          `UPDATE games SET state_json = $1, status = $2, updated_at = NOW() WHERE id = $3`,
+          [newState, "active", gameResult.rows[0].id],
         );
-        if (!roomResult.rowCount) {
-          return { status: 404, body: { error: "room not found" } };
-        }
-        const rulesResult = await client.query(
-          `SELECT rule_id, is_enabled FROM room_rules WHERE room_id = $1`,
-          [roomId],
+        await client.query(
+          `INSERT INTO game_moves (room_id, player_id, move_type, payload) VALUES ($1,$2,$3,$4)`,
+          [roomId, user.id, "init", {}],
         );
-        const rulesFromDb = rulesResult.rows.reduce((acc: Record<string, boolean>, row: any) => {
-          acc[row.rule_id] = Boolean(row.is_enabled);
-          return acc;
-        }, {});
-        const roomRow = roomResult.rows[0];
-        const safeConfig = {
-          roomId,
-          mode: roomConfig?.mode || roomRow.mode || "solo",
-          handSize: Number(roomConfig?.handSize || roomRow.hand_size || 7),
-          targetScore: Number(roomConfig?.targetScore || roomRow.score_target || 500),
-          rules: roomConfig?.rules || rulesFromDb,
-          players,
-        };
-        gameState = Engine.initGame(safeConfig);
+        return { status: 200, body: { success: true, gameState: newState } };
       }
       if (!gameState) return { status: 404, body: { error: "game not initialized" } };
       const currentPlayer = gameState.players?.[gameState.currentPlayerIndex];
