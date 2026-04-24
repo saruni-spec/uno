@@ -216,6 +216,7 @@ export function GameScreen({ roomId }: { roomId: string }) {
   useEffect(() => {
     if (!nextRoundPending || !BACKEND_ENABLED || !isUuid(roomId)) return;
     let cancelled = false;
+    const startedAt = Date.now();
     const tick = async () => {
       try {
         const next = (await getRoomState(roomId)) as GameState | null;
@@ -224,6 +225,12 @@ export function GameScreen({ roomId }: { roomId: string }) {
           setGame(next);
           setRound((r) => r + 1);
           setNextRoundPending(false);
+          gameRef.current = next;
+        } else if (Date.now() - startedAt > 8000) {
+          // Timeout safety: adopt whatever the server has and stop spinning.
+          setGame(next);
+          setNextRoundPending(false);
+          gameRef.current = next;
         }
       } catch {
         /* ignore */
@@ -421,19 +428,32 @@ export function GameScreen({ roomId }: { roomId: string }) {
     pushToast("UNO!");
   };
 
-  const nextRound = () => {
+  const nextRound = async () => {
     setUnoState("idle");
 
     if (backendActive) {
-      // In backend mode: don't create a local game from potentially incomplete config.
-      // Submit the init to the server and let the poll deliver the authoritative new game
-      // to ALL players, regardless of whose "Next hand" button was clicked.
       setNextRoundPending(true);
-      submitMove(roomId, {
-        type: "init",
-        playerId: meId || "me",
-        roomConfig: config,
-      }).catch(() => undefined);
+      try {
+        const result = await submitMove(roomId, {
+          type: "init",
+          playerId: meId || "me",
+          roomConfig: config,
+        });
+        // The server returns the authoritative new game state — use it directly.
+        const newGame = result?.gameState as GameState | null | undefined;
+        if (newGame?.phase === "playing") {
+          setGame(newGame);
+          setRound((r) => r + 1);
+          setNextRoundPending(false);
+          gameRef.current = newGame;
+          return;
+        }
+        // Server didn't return a playing game yet (other player may have init'd
+        // and the server returned the existing state). The nextRoundPending poll
+        // will pick it up within 1 s.
+      } catch {
+        // Network error — fall through to poll recovery.
+      }
       return;
     }
 
