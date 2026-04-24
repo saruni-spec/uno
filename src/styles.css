@@ -1179,7 +1179,7 @@ body {
   min-height: 200px;
 }
 
-/* Shout button */
+/* Shout button (legacy selector kept for compat) */
 .shout-btn {
   position: fixed;
   bottom: 26px;
@@ -1205,6 +1205,69 @@ body {
 }
 .shout-btn:active {
   transform: rotate(-8deg) scale(0.95);
+}
+
+/* Floating UNO button */
+.uno-float-btn {
+  position: fixed;
+  bottom: 28px;
+  right: 28px;
+  width: 90px;
+  height: 90px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 30% 30%, #ff6b88, var(--accent));
+  border: 4px solid #0a0418;
+  box-shadow:
+    0 8px 0 rgba(0, 0, 0, 0.4),
+    0 0 26px rgba(255, 60, 122, 0.45);
+  color: #fff;
+  font-family: "Lilita One", cursive;
+  font-size: 22px;
+  cursor: pointer;
+  transform: rotate(-8deg);
+  z-index: 30;
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
+}
+.uno-float-btn:hover {
+  transform: rotate(-8deg) scale(1.08);
+  box-shadow:
+    0 10px 0 rgba(0, 0, 0, 0.4),
+    0 0 40px rgba(255, 60, 122, 0.7);
+}
+.uno-float-btn:active {
+  transform: rotate(-8deg) scale(0.93);
+  box-shadow: 0 4px 0 rgba(0, 0, 0, 0.4);
+}
+.uno-float-btn--urgent {
+  animation: uno-pulse 0.7s ease-in-out infinite alternate;
+}
+@keyframes uno-pulse {
+  from { box-shadow: 0 8px 0 rgba(0,0,0,0.4), 0 0 26px rgba(255,60,122,0.45); }
+  to   { box-shadow: 0 8px 0 rgba(0,0,0,0.4), 0 0 50px rgba(255,60,122,0.9); transform: rotate(-8deg) scale(1.06); }
+}
+
+/* Inline UNO button in player-bar (small) */
+.uno-btn-shout {
+  background: var(--accent);
+  color: #fff;
+  font-family: "Lilita One", cursive;
+  border: 2px solid #0a0418;
+  border-radius: 999px;
+  padding: 4px 14px;
+  font-size: 15px;
+  cursor: pointer;
+  animation: uno-pulse 0.7s ease-in-out infinite alternate;
+}
+
+/* Card-play exit animation — card flies toward the discard pile */
+@keyframes card-play-out {
+  0%   { transform: translateY(0) scale(1); opacity: 1; }
+  60%  { transform: translateY(-40px) scale(1.08); opacity: 1; }
+  100% { transform: translateY(-120px) scale(0.7); opacity: 0; }
+}
+.card-button.playing {
+  animation: card-play-out 0.22s ease-in forwards;
+  pointer-events: none;
 }
 @keyframes shake {
   0%,

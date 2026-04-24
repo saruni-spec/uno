@@ -16,6 +16,7 @@ import { BotAdapter } from "../../lib/bot/adapter";
 import { Engine, type Card as EngineCard, type GameState, type InitGameConfig } from "../../lib/engine";
 import { loadActiveMatch, saveActiveMatch } from "../../lib/game/match-state";
 import { loadRoomConfig } from "../../lib/game/session";
+import { Sounds } from "../../lib/game/sounds";
 import { Card, Confetti } from "./primitives";
 
 const FALLBACK_CONFIG: InitGameConfig = {
@@ -57,8 +58,15 @@ export function GameScreen({ roomId }: { roomId: string }) {
   const [scores, setScores] = useState<Record<string, number>>({});
   const [syncStatus, setSyncStatus] = useState<"local" | "connecting" | "live">("local");
   const [waitingForHost, setWaitingForHost] = useState(false);
+  // UNO state: "idle" | "must-shout" (played down to 1, not shouted yet) | "shouted"
+  const [unoState, setUnoState] = useState<"idle" | "must-shout" | "shouted">("idle");
+  // ID of the card currently mid-play animation so we can apply the fly-out CSS class
+  const [playingCardId, setPlayingCardId] = useState<string | null>(null);
   // Stable ref for latest game state so bot effect never reads stale values.
   const gameRef = useRef<GameState | null>(null);
+  // Timestamp of last local move — poll results arriving within 1.5 s are ignored
+  // to prevent the optimistic state from flickering back to old server state.
+  const lastLocalMoveAt = useRef<number>(0);
   // True when room has only one human (rest are bots). All game logic runs
   // locally in this mode; backend is used only for persistence (fire-and-forget).
   // Solo-vs-bots only: exactly one human in saved config and at least one bot.
@@ -155,10 +163,15 @@ export function GameScreen({ roomId }: { roomId: string }) {
       setSyncStatus("local");
       return;
     }
+    const POLL_SUPPRESS_MS = 1800;
     const off = subscribeRoomState(
       roomId,
       (next) => {
-        if (next) setGame(next as GameState);
+        if (!next) return;
+        // Ignore poll results that arrive too soon after a local move — they
+        // carry the pre-move server state and would cause the discard / hand to flicker.
+        if (Date.now() - lastLocalMoveAt.current < POLL_SUPPRESS_MS) return;
+        setGame(next as GameState);
       },
       (status) => {
         if (status === "connected") setSyncStatus("live");
@@ -225,6 +238,7 @@ export function GameScreen({ roomId }: { roomId: string }) {
       .reduce((sum, p) => sum + Engine.calculateScore(p.hand), 0);
     setScores((prev) => ({ ...prev, [winnerId]: (prev[winnerId] || 0) + points }));
     pushToast(`${state.players.find((p) => p.id === winnerId)?.name || "Player"} won the hand (+${points})`);
+    Sounds.win();
     return { ...state, phase: "finished" as const, winner: winnerId };
   }, [pushToast]);
 
@@ -262,16 +276,74 @@ export function GameScreen({ roomId }: { roomId: string }) {
 
   const onPlay = (card: EngineCard) => {
     if (!game || !current || current.id !== meId || game.phase !== "playing") return;
+    setPlayingCardId(card.id);
+    setTimeout(() => setPlayingCardId(null), 240);
 
-    // Always apply locally first — instant feedback for the player.
+    // If player had 2 cards and didn't shout UNO, apply penalty draw before playing
+    const myHand = game.players.find((p) => p.id === meId)?.hand ?? [];
+    if (myHand.length === 2 && unoState !== "shouted") {
+      // Draw 2 penalty cards silently, then play
+      const penaltyDrawn = Engine.drawMultiple(game.deck, 2, game.discardPile);
+      const penaltyPlayers = game.players.map((p) =>
+        p.id === meId ? { ...p, hand: [...p.hand, ...penaltyDrawn.drawnCards] } : p,
+      );
+      const penaltyState: GameState = {
+        ...game,
+        players: penaltyPlayers,
+        deck: penaltyDrawn.newDeck,
+        discardPile: penaltyDrawn.newDiscardPile,
+      };
+      pushToast("Forgot to say UNO! Drew 2 cards.");
+      Sounds.penalty();
+      // Now play from penaltyState
+      const nextState = applyPlayLocally(penaltyState, card, current.id);
+      if (!nextState) { setGame(penaltyState); setUnoState("idle"); return; }
+      Sounds.play();
+      const winner = Engine.checkWinner(nextState, current.id);
+      const finalState = winner.isWinner ? settleWinner(nextState, current.id) : advanceTurn(nextState);
+      lastLocalMoveAt.current = Date.now();
+      setGame(finalState);
+      setUnoState("idle");
+      if (winner.isWinner) Sounds.win();
+      if (backendActive) {
+        submitMove(roomId, { type: "play", playerId: current.id, cardId: card.id,
+          chosenColor: card.color === "wild" ? bestWildColor(penaltyState.players[game.currentPlayerIndex].hand) : undefined,
+          gameState: finalState }).catch(() => undefined);
+      }
+      return;
+    }
+
+    // Normal play
     const nextState = applyPlayLocally(game, card, current.id);
     if (!nextState) return;
 
+    // Sound based on card type
+    if (card.color === "wild") Sounds.wild();
+    else if (["skip", "reverse", "draw2"].includes(card.value)) Sounds.skip();
+    else Sounds.play();
+
     const winner = Engine.checkWinner(nextState, current.id);
     const finalState = winner.isWinner ? settleWinner(nextState, current.id) : advanceTurn(nextState);
+    lastLocalMoveAt.current = Date.now();
     setGame(finalState);
 
-    // Persist to backend in background (bot match or regular backend).
+    if (winner.isWinner) {
+      Sounds.win();
+      setUnoState("idle");
+    } else {
+      const remainingCards = nextState.players.find((p) => p.id === meId)?.hand.length ?? 0;
+      if (remainingCards === 1) {
+        // Player played down to 1 — must have shouted UNO
+        if (unoState !== "shouted") {
+          setUnoState("must-shout");
+        } else {
+          setUnoState("idle");
+        }
+      } else {
+        setUnoState("idle");
+      }
+    }
+
     if (backendActive) {
       submitMove(roomId, {
         type: "play",
@@ -294,9 +366,11 @@ export function GameScreen({ roomId }: { roomId: string }) {
           ? "You drew a card"
           : "You drew and passed",
     );
+    Sounds.draw();
+    lastLocalMoveAt.current = Date.now();
     setGame(nextState);
+    setUnoState("idle");
 
-    // Persist to backend in background.
     if (backendActive) {
       submitMove(roomId, {
         type: "draw",
@@ -306,8 +380,15 @@ export function GameScreen({ roomId }: { roomId: string }) {
     }
   };
 
+  const onShoutUno = () => {
+    Sounds.uno();
+    setUnoState("shouted");
+    pushToast("UNO!");
+  };
+
   const nextRound = () => {
     setRound((r) => r + 1);
+    setUnoState("idle");
     setGame(Engine.initGame(config));
   };
 
@@ -338,6 +419,7 @@ export function GameScreen({ roomId }: { roomId: string }) {
           i === latest.currentPlayerIndex ? { ...p, hand: [...p.hand, ...drawn.drawnCards] } : p,
         );
         pushToast(`${player.name} drew ${count} card${count > 1 ? "s" : ""}`);
+        Sounds.draw();
         nextState = advanceTurn({
           ...latest,
           players: nextPlayers,
@@ -359,6 +441,9 @@ export function GameScreen({ roomId }: { roomId: string }) {
           currentColor: botCard.color === "wild" ? move.chosenColor || "red" : botCard.color,
         };
         nextState = Engine.applyCardEffect(nextState, botCard);
+        if (botCard.color === "wild") Sounds.wild();
+        else if (["skip", "reverse", "draw2"].includes(botCard.value)) Sounds.skip();
+        else Sounds.play();
         const winner = Engine.checkWinner(nextState, player.id);
         if (winner.isWinner) {
           setGame(settleWinner(nextState, player.id));
@@ -486,15 +571,26 @@ export function GameScreen({ roomId }: { roomId: string }) {
           </div>
           <div className="player-area">
             <div className="player-bar">
-              <span className="chip ok">{game.phase === "finished" ? "Hand finished" : "Play a card or draw"}</span>
+              <span className="chip ok">
+                {game.phase === "finished"
+                  ? "Hand finished"
+                  : current.id === meId
+                    ? "Your turn"
+                    : `${current.name}'s turn`}
+              </span>
               <span className="chip">Score: {scores[meId] || 0}</span>
+              {unoState === "must-shout" ? (
+                <button className="btn uno-btn-shout" onClick={onShoutUno} aria-label="Say UNO">
+                  UNO!
+                </button>
+              ) : null}
             </div>
             <div className="hand">
               {(me?.hand ?? []).map((c) => (
                 <button
                   key={c.id}
                   onClick={() => onPlay(c)}
-                  className="card-button"
+                  className={`card-button${playingCardId === c.id ? " playing" : ""}`}
                   disabled={current.id !== meId || game.phase !== "playing"}
                   aria-label={`Play ${c.color} ${c.value}`}
                   title={`Play ${c.color} ${c.value}`}
@@ -520,6 +616,20 @@ export function GameScreen({ roomId }: { roomId: string }) {
           </div>
         </div>
       </div>
+      {/* Floating UNO button — show when you have 2 cards on your turn (pre-shout)
+          OR when you played down to 1 without shouting (must-shout) */}
+      {game.phase === "playing" &&
+        current.id === meId &&
+        unoState !== "shouted" &&
+        (unoState === "must-shout" || (me?.hand.length ?? 0) <= 2) ? (
+        <button
+          className={`btn uno-float-btn ${unoState === "must-shout" ? "uno-float-btn--urgent" : ""}`}
+          onClick={onShoutUno}
+          aria-label="Say UNO"
+        >
+          UNO!
+        </button>
+      ) : null}
       {game.phase === "finished" ? <Confetti /> : null}
     </div>
   );
