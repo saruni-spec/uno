@@ -58,6 +58,7 @@ export function GameScreen({ roomId }: { roomId: string }) {
   const [scores, setScores] = useState<Record<string, number>>({});
   const [syncStatus, setSyncStatus] = useState<"local" | "connecting" | "live">("local");
   const [waitingForHost, setWaitingForHost] = useState(false);
+  const [nextRoundPending, setNextRoundPending] = useState(false);
   // UNO state: "idle" | "must-shout" (played down to 1, not shouted yet) | "shouted"
   const [unoState, setUnoState] = useState<"idle" | "must-shout" | "shouted">("idle");
   // ID of the card currently mid-play animation so we can apply the fly-out CSS class
@@ -174,6 +175,11 @@ export function GameScreen({ roomId }: { roomId: string }) {
         // Never let a stale "finished" server state overwrite an active local game.
         // This happens between nextRound() and the server catching up with the new init.
         if (incoming.phase === "finished" && gameRef.current?.phase === "playing") return;
+        if (incoming.phase === "playing" && gameRef.current?.phase === "finished") {
+          // Other player started the next round — adopt it and clear pending state.
+          setNextRoundPending(false);
+          setRound((r) => r + 1);
+        }
         setGame(incoming);
       },
       (status) => {
@@ -204,6 +210,32 @@ export function GameScreen({ roomId }: { roomId: string }) {
       window.clearInterval(id);
     };
   }, [waitingForHost, roomId]);
+
+  // When "Next hand" is clicked in backend mode, poll until the server returns
+  // a fresh "playing" game (which might have been started by ANY player).
+  useEffect(() => {
+    if (!nextRoundPending || !BACKEND_ENABLED || !isUuid(roomId)) return;
+    let cancelled = false;
+    const tick = async () => {
+      try {
+        const next = (await getRoomState(roomId)) as GameState | null;
+        if (cancelled || !next) return;
+        if (next.phase === "playing") {
+          setGame(next);
+          setRound((r) => r + 1);
+          setNextRoundPending(false);
+        }
+      } catch {
+        /* ignore */
+      }
+    };
+    void tick();
+    const id = window.setInterval(tick, 1000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
+  }, [nextRoundPending, roomId]);
 
   useEffect(() => {
     if (!game) return;
@@ -390,23 +422,27 @@ export function GameScreen({ roomId }: { roomId: string }) {
   };
 
   const nextRound = () => {
-    const newGame = Engine.initGame(config);
-    // Suppress polls for 5 s — long enough for the server init to land.
-    lastLocalMoveAt.current = Date.now() + 3200;
-    setRound((r) => r + 1);
     setUnoState("idle");
-    setGame(newGame);
-    gameRef.current = newGame;
-    // Push the freshly-seeded game to the server so the next poll returns the
-    // new round rather than the old finished state.
+
     if (backendActive) {
+      // In backend mode: don't create a local game from potentially incomplete config.
+      // Submit the init to the server and let the poll deliver the authoritative new game
+      // to ALL players, regardless of whose "Next hand" button was clicked.
+      setNextRoundPending(true);
       submitMove(roomId, {
         type: "init",
         playerId: meId || "me",
         roomConfig: config,
-        gameState: newGame,
       }).catch(() => undefined);
+      return;
     }
+
+    // Local mode — instant new game from local config.
+    const newGame = Engine.initGame(config);
+    lastLocalMoveAt.current = Date.now() + 3200;
+    setRound((r) => r + 1);
+    setGame(newGame);
+    gameRef.current = newGame;
   };
 
   useEffect(() => {
@@ -620,10 +656,16 @@ export function GameScreen({ roomId }: { roomId: string }) {
               ))}
             </div>
             {game.phase === "finished" ? (
-              <div className="mt-12">
-                <button className="btn primary" onClick={nextRound}>
-                  Next hand
-                </button>
+              <div className="mt-12" style={{ display: "flex", gap: 10, flexWrap: "wrap", justifyContent: "center" }}>
+                {nextRoundPending ? (
+                  <span className="chip" style={{ fontSize: 15, padding: "10px 18px" }}>
+                    ⏳ Starting next round…
+                  </span>
+                ) : (
+                  <button className="btn primary" onClick={nextRound}>
+                    Next hand
+                  </button>
+                )}
               </div>
             ) : null}
             <div className="toast-stack">
