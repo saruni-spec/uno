@@ -83,9 +83,49 @@ export function RoomSetupScreen({ roomId }: { roomId: string }) {
   const [inviteCopied, setInviteCopied] = useState(false);
   const [guestTab, setGuestTab] = useState(false);
 
+  /** Pick a random team not already heavily used by existing players */
+  const pickTeam = (existing: PlayerDraft[]): string => {
+    const counts: Record<string, number> = { A: 0, B: 0 };
+    existing.forEach((p) => { counts[p.team] = (counts[p.team] || 0) + 1; });
+    // pick least-used; if tied, random
+    const [a, b] = [counts["A"] ?? 0, counts["B"] ?? 0];
+    if (a < b) return "A";
+    if (b < a) return "B";
+    return Math.random() < 0.5 ? "A" : "B";
+  };
+
   useEffect(() => {
     setGuestTab(typeof window !== "undefined" && isTabScopedInviteSession());
   }, []);
+
+  // Smart defaults when the mode changes
+  useEffect(() => {
+    if (mode === "solo") {
+      setPlayers((prev) => {
+        const humans = prev.filter((p) => !p.isBot);
+        const bots = prev.filter((p) => p.isBot);
+        // Keep exactly one bot (the first existing one, or add a Normal Bot)
+        const bot: PlayerDraft = bots[0] ?? {
+          id: `ai-${Date.now()}`,
+          name: "Normal Bot",
+          av: "🤖",
+          bg: "#7b5cff",
+          team: "B",
+          isBot: true,
+          difficulty: "normal",
+        };
+        return [...humans, bot];
+      });
+    } else if (mode === "teams") {
+      setPlayers((prev) =>
+        prev.map((p, i) =>
+          // Assign balanced teams: you get a random team, each next player alternates
+          i === 0 ? { ...p, team: Math.random() < 0.5 ? "A" : "B" } : p,
+        ),
+      );
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode]);
 
   useEffect(() => {
     if (!BACKEND_ENABLED || isNew || !isUuid(roomId)) return;
@@ -93,16 +133,15 @@ export function RoomSetupScreen({ roomId }: { roomId: string }) {
     (async () => {
       try {
         await ensureSession();
-        try {
-          await joinRoom(roomId, { team: "A" });
-        } catch {
-          /* already a member or transient join error */
-        }
         const room = await getRoom(roomId);
         if (!cancelled) {
           setServerRoom(room);
           const n = room.players?.length ?? room.playerCount ?? 0;
           setRoomMemberCount(typeof n === "number" ? n : 0);
+          // Auto-join with a balanced team assignment
+          const existingTeams = (room.players ?? []).map((p: any) => ({ team: p.team || "A" } as PlayerDraft));
+          const autoTeam = pickTeam(existingTeams);
+          try { await joinRoom(roomId, { team: autoTeam }); } catch { /* already member */ }
         }
       } catch {
         if (!cancelled) {
@@ -117,18 +156,37 @@ export function RoomSetupScreen({ roomId }: { roomId: string }) {
   }, [roomId, isNew]);
 
   const addBot = (difficulty: "easy" | "normal" | "hard") => {
-    setPlayers((prev) => [
-      ...prev,
-      {
-        id: `ai-${Date.now()}-${prev.length}`,
-        name: `${difficulty[0].toUpperCase()}${difficulty.slice(1)} Bot ${prev.length}`,
-        av: difficulty === "hard" ? "🧠" : difficulty === "easy" ? "🎲" : "🤖",
-        bg: difficulty === "hard" ? "#ff3c7a" : difficulty === "easy" ? "#3ddcc8" : "#7b5cff",
-        team: prev.length % 2 === 0 ? "A" : "B",
-        isBot: true,
-        difficulty,
-      },
-    ]);
+    setPlayers((prev) => {
+      const team = pickTeam(prev);
+      return [
+        ...prev,
+        {
+          id: `ai-${Date.now()}-${prev.length}`,
+          name: `${difficulty[0].toUpperCase()}${difficulty.slice(1)} Bot`,
+          av: difficulty === "hard" ? "🧠" : difficulty === "easy" ? "🎲" : "🤖",
+          bg: difficulty === "hard" ? "#ff3c7a" : difficulty === "easy" ? "#3ddcc8" : "#7b5cff",
+          team,
+          isBot: true,
+          difficulty,
+        },
+      ];
+    });
+  };
+
+  const changeBotDifficulty = (idx: number, difficulty: "easy" | "normal" | "hard") => {
+    setPlayers((prev) =>
+      prev.map((p, i) =>
+        i === idx
+          ? {
+              ...p,
+              difficulty,
+              name: `${difficulty[0].toUpperCase()}${difficulty.slice(1)} Bot`,
+              av: difficulty === "hard" ? "🧠" : difficulty === "easy" ? "🎲" : "🤖",
+              bg: difficulty === "hard" ? "#ff3c7a" : difficulty === "easy" ? "#3ddcc8" : "#7b5cff",
+            }
+          : p,
+      ),
+    );
   };
 
   const handleStart = async () => {
@@ -140,7 +198,8 @@ export function RoomSetupScreen({ roomId }: { roomId: string }) {
       if (BACKEND_ENABLED && !isNew && isUuid(roomId)) {
         await ensureSession();
         try {
-          await joinRoom(roomId, { team: "A" });
+          const myTeam = players.find((p) => p.id === "me")?.team ?? "A";
+          await joinRoom(roomId, { team: myTeam });
         } catch {
           /* ignore */
         }
@@ -173,7 +232,8 @@ export function RoomSetupScreen({ roomId }: { roomId: string }) {
           effectiveRoomId = created.id;
         } else {
           try {
-            await joinRoom(roomId, { team: "A" });
+            const myTeam = players.find((p) => p.id === "me")?.team ?? "A";
+            await joinRoom(roomId, { team: myTeam });
           } catch {
             /* ignore */
           }
@@ -283,7 +343,8 @@ export function RoomSetupScreen({ roomId }: { roomId: string }) {
     try {
       await ensureSession();
       try {
-        await joinRoom(roomId, { team: "A" });
+        const myTeam = players.find((p) => p.id === "me")?.team ?? "A";
+        await joinRoom(roomId, { team: myTeam });
       } catch {
         /* ignore */
       }
@@ -380,29 +441,42 @@ export function RoomSetupScreen({ roomId }: { roomId: string }) {
               <label>Room name</label>
               <input aria-label="Room name" value={name} onChange={(e) => setName(e.target.value)} />
             </div>
+
+            {/* Mode picker — segmented control style */}
             <div className="field">
               <label>Mode</label>
-              <select
-                aria-label="Game mode"
-                value={mode}
-                onChange={(e) => setMode(e.target.value as typeof mode)}
-              >
-                <option value="solo">Solo</option>
-                <option value="teams">Teams</option>
-                <option value="shared-hand">Shared hand</option>
-              </select>
+              <div className="mode-seg">
+                {(["solo", "teams", "shared-hand"] as const).map((m) => (
+                  <button
+                    key={m}
+                    type="button"
+                    className={`mode-seg-btn${mode === m ? " active" : ""}`}
+                    onClick={() => setMode(m)}
+                  >
+                    {m === "solo" ? "🧍 Solo" : m === "teams" ? "👥 Teams" : "🤝 Shared hand"}
+                  </button>
+                ))}
+              </div>
+              <p className="field-hint">
+                {mode === "solo"
+                  ? "Play against the AI. Swap difficulty below."
+                  : mode === "teams"
+                    ? "Compete in teams. You've been auto-assigned a team — change it anytime."
+                    : "Everyone shares a single hand of cards."}
+              </p>
             </div>
-            <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
-              <button className="btn ghost sm" onClick={() => addBot("easy")}>
-                + Easy AI
-              </button>
-              <button className="btn ghost sm" onClick={() => addBot("normal")}>
-                + Normal AI
-              </button>
-              <button className="btn ghost sm" onClick={() => addBot("hard")}>
-                + Hard AI
-              </button>
-            </div>
+
+            {/* In teams/shared-hand, let host add more bots */}
+            {mode !== "solo" && (
+              <div className="add-bot-row">
+                <span className="chip">+ Add AI opponent</span>
+                {(["easy", "normal", "hard"] as const).map((d) => (
+                  <button key={d} className="btn ghost sm" onClick={() => addBot(d)}>
+                    {d === "easy" ? "🎲" : d === "normal" ? "🤖" : "🧠"} {d[0].toUpperCase() + d.slice(1)}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
 
           <div>
@@ -412,11 +486,31 @@ export function RoomSetupScreen({ roomId }: { roomId: string }) {
                 <div key={p.id} className="rule-row on">
                   <div className="rr-meta">
                     <div className="rr-title">
-                      {p.av} {p.name}{" "}
-                      {p.isBot ? <span className="chip">{p.difficulty}</span> : null}
+                      {p.av} {p.isBot ? "" : p.name}
+                      {p.isBot && mode === "solo" ? (
+                        /* Inline difficulty toggle for the solo bot */
+                        <span className="diff-toggle">
+                          {(["easy", "normal", "hard"] as const).map((d) => (
+                            <button
+                              key={d}
+                              type="button"
+                              className={`diff-btn${p.difficulty === d ? " active" : ""}`}
+                              onClick={() => changeBotDifficulty(idx, d)}
+                            >
+                              {d === "easy" ? "🎲" : d === "normal" ? "🤖" : "🧠"} {d}
+                            </button>
+                          ))}
+                        </span>
+                      ) : p.isBot ? (
+                        <span className="chip">{p.difficulty}</span>
+                      ) : null}
                     </div>
                     <div className="rr-desc">
-                      {mode === "solo" ? (p.isBot ? "AI opponent" : "You") : `Team ${p.team}`}
+                      {mode === "solo"
+                        ? p.isBot
+                          ? "AI opponent"
+                          : "You"
+                        : `Team ${p.team}`}
                     </div>
                   </div>
                   <div className="rr-actions">
