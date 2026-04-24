@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import {
   createCustomCard,
+  deleteGameResult,
   ensureSession,
   getHistory,
   getLeaderboard,
@@ -15,6 +16,7 @@ export function ExtrasScreen() {
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [cards, setCards] = useState<CustomCard[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [deletingResultId, setDeletingResultId] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [form, setForm] = useState({
     name: "Mulligan",
@@ -53,6 +55,22 @@ export function ExtrasScreen() {
       setCards((prev) => [created, ...prev]);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not create custom card");
+    }
+  };
+
+  const onDeleteResult = async (resultId?: string) => {
+    if (!resultId) return;
+    const ok = window.confirm("Delete this game entry from history?");
+    if (!ok) return;
+    setDeletingResultId(resultId);
+    setError("");
+    try {
+      await deleteGameResult(resultId);
+      setHistory((prev) => prev.filter((h) => h.id !== resultId));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not delete game history");
+    } finally {
+      setDeletingResultId(null);
     }
   };
 
@@ -102,6 +120,16 @@ export function ExtrasScreen() {
               <div key={`${h.id || "g"}-${i}`} className="history-row">
                 <div>{h.room || "Room"}</div>
                 <div className="history-winner">{h.winner || "Winner"}</div>
+                {h.id ? (
+                  <button
+                    type="button"
+                    className="btn ghost sm"
+                    disabled={deletingResultId === h.id}
+                    onClick={() => onDeleteResult(h.id)}
+                  >
+                    {deletingResultId === h.id ? "Deleting..." : "Delete"}
+                  </button>
+                ) : null}
               </div>
             ))
           ) : (

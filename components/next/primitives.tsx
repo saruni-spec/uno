@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useMemo, type CSSProperties, type ReactNode } from "react";
 
 type CardProps = {
   color?: "red" | "yellow" | "green" | "blue" | "wild";
@@ -104,12 +104,18 @@ export function Sticker({
 
 export function Confetti({ onDone }: { onDone?: () => void }) {
   const colors = ["#ff3c7a", "#ffd23f", "#3ddcc8", "#7b5cff", "#4a8cff", "#3ddc84"];
-  const pieces = Array.from({ length: 40 }, (_, i) => ({
-    left: Math.random() * 100,
-    delay: Math.random() * 0.2,
-    color: colors[i % colors.length],
-    rot: Math.random() * 360,
-  }));
+  // Memoized so positions are stable across re-renders (e.g. score updates).
+  const pieces = useMemo(
+    () =>
+      Array.from({ length: 40 }, (_, i) => ({
+        left: Math.random() * 100,
+        delay: Math.random() * 0.2,
+        color: colors[i % colors.length],
+        rot: Math.random() * 360,
+      })),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
   useEffect(() => {
     if (!onDone) return;
     const t = setTimeout(() => onDone(), 1600);

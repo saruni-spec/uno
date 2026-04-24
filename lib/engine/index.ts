@@ -36,9 +36,6 @@ function generateCardId(): string {
   return `c-${Date.now()}-${cardIdCounter++}`;
 }
 
-function asColor(color: Color): Color {
-  return color;
-}
 
 export const Engine = {
   CARD_POINTS,
@@ -66,7 +63,7 @@ export const Engine = {
     for (const custom of customCards) {
       deck.push({
         id: generateCardId(),
-        color: asColor(custom.color || "wild"),
+        color: (custom.color || "wild") as Color,
         value: "wild",
         customId: custom.id,
         customName: custom.name,
@@ -193,7 +190,8 @@ export const Engine = {
     const player = gameState.players.find((p) => p.id === playerId);
     if (!player) return { isWinner: false };
     if (player.hand.length > 0) return { isWinner: false };
-    if (gameState.rules.noSpecialFinish) {
+    const rules = gameState.rules || {};
+    if (rules.noSpecialFinish) {
       const last = gameState.topCard.value;
       if (["skip", "reverse", "draw2", "wild", "wild4"].includes(last)) {
         return { isWinner: false, reason: "Cannot win on special card" };
@@ -225,9 +223,13 @@ export const Engine = {
       if (!["skip", "reverse", "draw2", "wild", "wild4"].includes(card.value)) break;
       topCardIndex += 1;
     }
-    const safeTopIndex = topCardIndex < remainingDeck.length ? topCardIndex : 0;
+    if (topCardIndex >= remainingDeck.length) {
+      throw new Error(
+        "Failed to initialize game: all remaining deck cards are action/wild cards — cannot pick a safe starting top card.",
+      );
+    }
+    const safeTopIndex = topCardIndex;
     const topCard = remainingDeck[safeTopIndex];
-    if (!topCard) throw new Error("Failed to initialize game: deck is empty after dealing");
     const deckAfterFlip = [
       ...remainingDeck.slice(0, safeTopIndex),
       ...remainingDeck.slice(safeTopIndex + 1),

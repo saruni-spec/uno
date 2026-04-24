@@ -3,9 +3,9 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { BACKEND_ENABLED } from "../../lib/api/config";
-import { ensureSession, listRooms } from "../../lib/api/client";
+import { deleteRoom, ensureSession, listRooms, readStoredUser } from "../../lib/api/client";
 import type { RoomSummary } from "../../lib/api/types";
-import { listActiveMatches } from "../../lib/game/match-state";
+import { deleteActiveMatch, listActiveMatches } from "../../lib/game/match-state";
 import { Card, Sticker } from "./primitives";
 
 export function LobbyScreen() {
@@ -14,6 +14,9 @@ export function LobbyScreen() {
     Array<{ roomId: string; updatedAt: number; round: number }>
   >([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [deletingRoomId, setDeletingRoomId] = useState<string | null>(null);
+  const [deletingMatchId, setDeletingMatchId] = useState<string | null>(null);
+  const [myUserId, setMyUserId] = useState<string>("");
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -36,7 +39,8 @@ export function LobbyScreen() {
       setIsLoading(true);
       setError("");
       try {
-        await ensureSession();
+        const session = await ensureSession();
+        if (!cancelled) setMyUserId(session.id);
         const next = await listRooms();
         if (!cancelled) setRooms(next);
       } catch (e) {
@@ -55,6 +59,41 @@ export function LobbyScreen() {
     () => rooms.filter((r) => r.status === "playing").length,
     [rooms],
   );
+  const storedUserId = readStoredUser()?.id || "";
+
+  const onDeleteRoom = async (e: React.MouseEvent<HTMLButtonElement>, room: RoomSummary) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const currentUserId = myUserId || storedUserId;
+    const isHost =
+      room.hostUserId === currentUserId ||
+      Boolean(room.isHost) ||
+      Boolean(room.players?.find((p) => p.id === currentUserId)?.is_host);
+    if (!isHost) return;
+    const ok = window.confirm(`Delete room "${room.name}"?`);
+    if (!ok) return;
+    setDeletingRoomId(room.id);
+    setError("");
+    try {
+      await deleteRoom(room.id);
+      setRooms((prev) => prev.filter((r) => r.id !== room.id));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not delete room");
+    } finally {
+      setDeletingRoomId(null);
+    }
+  };
+
+  const onDeleteMatch = (e: React.MouseEvent<HTMLButtonElement>, roomId: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const ok = window.confirm("Remove this saved match from your local resume list?");
+    if (!ok) return;
+    setDeletingMatchId(roomId);
+    deleteActiveMatch(roomId);
+    setActiveMatches((prev) => prev.filter((m) => m.roomId !== roomId));
+    setDeletingMatchId(null);
+  };
 
   return (
     <div className="page">
@@ -70,7 +109,7 @@ export function LobbyScreen() {
             <span className="bang">Card House</span>
           </h1>
           <p className="hero-sub">
-            Phase 3 is wired: typed API client + session bootstrap + backend-backed room list.
+            Play with friends online or set up a local game with bots. Create a room or join an existing one below.
           </p>
           <div className="hero-cta">
             <Link className="btn primary" href="/room/new">
@@ -90,15 +129,9 @@ export function LobbyScreen() {
           )}
         </div>
         <div className="hero-deck">
-          <Sticker className="yel sticker-a">
-            Typed API Client
-          </Sticker>
-          <Sticker className="pink sticker-b">
-            Session Bootstrap
-          </Sticker>
-          <Sticker className="green sticker-c">
-            Live Rooms
-          </Sticker>
+          <Sticker className="yel sticker-a">House Rules</Sticker>
+          <Sticker className="pink sticker-b">Play Online</Sticker>
+          <Sticker className="green sticker-c">Custom Cards</Sticker>
           <div className="hero-card-pos hero-card-1">
             <Card color="red" value="7" size="lg" />
           </div>
@@ -135,6 +168,16 @@ export function LobbyScreen() {
                   Updated {Math.max(1, Math.floor((Date.now() - match.updatedAt) / 60000))}m ago
                 </span>
               </div>
+              <div className="rc-delete-row">
+                <button
+                  type="button"
+                  className="btn ghost sm rc-delete-btn"
+                  disabled={deletingMatchId === match.roomId}
+                  onClick={(e) => onDeleteMatch(e, match.roomId)}
+                >
+                  {deletingMatchId === match.roomId ? "Removing..." : "Delete Match"}
+                </button>
+              </div>
             </div>
           </Link>
         ))}
@@ -142,11 +185,7 @@ export function LobbyScreen() {
         {!isLoading && rooms.length === 0 && <div className="panel">No active rooms yet.</div>}
         {!isLoading &&
           rooms.map((room) => (
-            <Link
-              key={room.id}
-              href={`/room/${room.id}`}
-              className="room-card room-card-link"
-            >
+            <Link key={room.id} href={`/room/${room.id}`} className="room-card room-card-link">
               <div className="rc-inner">
                 <div className="rc-head">
                   <div className="rc-icon rc-icon-room">
@@ -170,6 +209,20 @@ export function LobbyScreen() {
                     <span className="chip ok">Waiting</span>
                   )}
                 </div>
+                {(room.hostUserId === (myUserId || storedUserId) ||
+                  Boolean(room.isHost) ||
+                  Boolean(room.players?.find((p) => p.id === (myUserId || storedUserId))?.is_host)) && (
+                  <div className="rc-delete-row">
+                    <button
+                      type="button"
+                      className="btn ghost sm rc-delete-btn"
+                      disabled={deletingRoomId === room.id}
+                      onClick={(e) => onDeleteRoom(e, room)}
+                    >
+                      {deletingRoomId === room.id ? "Deleting..." : "Delete Room"}
+                    </button>
+                  </div>
+                )}
               </div>
             </Link>
           ))}

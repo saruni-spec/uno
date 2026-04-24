@@ -54,7 +54,8 @@ async function main() {
   if (refresh.status === 200 && refresh.body?.user?.token) pass("Session refresh");
   else fail("Session refresh", `status ${refresh.status}`);
 
-  const unauthorized = await api("/rooms", { token: "bad.token.value" });
+  // GET /rooms is public; use POST /rooms (requires auth) to test rejection.
+  const unauthorized = await api("/rooms", { method: "POST", token: "bad.token.value", body: { name: "x" } });
   if (unauthorized.status === 401) pass("Invalid token rejected");
   else fail("Invalid token rejected", `status ${unauthorized.status}`);
 

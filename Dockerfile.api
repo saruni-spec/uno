@@ -7,6 +7,10 @@ RUN npm install
 
 COPY . .
 
-EXPOSE 4000
+# Build the Next.js app (API is served via Next.js Route Handlers)
+RUN npm run build
 
-CMD ["npm", "run", "dev:api"]
+EXPOSE 3002
+
+# Run DB migrations then start the production Next.js server
+CMD ["sh", "-c", "node server/scripts/migrate.js && npm start"]

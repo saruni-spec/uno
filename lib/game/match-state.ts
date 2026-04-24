@@ -47,3 +47,8 @@ export function listActiveMatches(): ActiveMatch[] {
   }
   return matches.sort((a, b) => b.updatedAt - a.updatedAt);
 }
+
+export function deleteActiveMatch(roomId: string): void {
+  if (typeof window === "undefined") return;
+  localStorage.removeItem(keyFor(roomId));
+}

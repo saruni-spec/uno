@@ -14,6 +14,7 @@ import Engine from "../../../src/engine.js";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+const API_MOVES_DEBUG_PREFIX = "[api/moves]";
 
 async function getRoomMembership(client: any, roomId: string, userId: string) {
   const result = await client.query(
@@ -82,10 +83,14 @@ async function getRoomDetails(client: any, roomId: string) {
   return room;
 }
 
-async function getRoomPlayersForEngine(client: any, roomId: string) {
+async function getRoomPlayersForEngine(
+  client: any,
+  roomId: string,
+  botNames?: Set<string>,
+) {
   const result = await client.query(
     `
-      SELECT rp.user_id AS id, rp.team, u.username AS name
+      SELECT rp.user_id AS id, rp.team, u.username AS name, u.avatar_emoji AS av, u.avatar_color AS bg
       FROM room_players rp
       JOIN users u ON u.id = rp.user_id
       WHERE rp.room_id = $1
@@ -93,7 +98,14 @@ async function getRoomPlayersForEngine(client: any, roomId: string) {
     `,
     [roomId],
   );
-  return result.rows.map((p: any) => ({ id: p.id, name: p.name, team: p.team || null }));
+  return result.rows.map((p: any) => ({
+    id: p.id,
+    name: p.name,
+    av: p.av,
+    bg: p.bg,
+    team: p.team || null,
+    isBot: botNames ? botNames.has(String(p.name || "")) : false,
+  }));
 }
 
 function json(status: number, body: unknown) {
@@ -106,6 +118,17 @@ function forbidden(message: string) {
 
 function invalidUuid(field: string) {
   return json(400, { error: "invalid_input", message: `${field} must be a valid uuid` });
+}
+
+function tooLong(field: string, max: number) {
+  return json(400, { error: "invalid_input", message: `${field} must be ${max} characters or fewer` });
+}
+
+function checkLength(fields: Record<string, [unknown, number]>) {
+  for (const [field, [value, max]] of Object.entries(fields)) {
+    if (typeof value === "string" && value.length > max) return tooLong(field, max);
+  }
+  return null;
 }
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ slug: string[] }> }) {
@@ -309,8 +332,21 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ slu
   if (slug.length === 1 && slug[0] === "rooms") {
     const user: any = await requireAuthUser(req);
     if (!user) return json(401, { error: "unauthorized", message: "Bearer token is required" });
-    const { name, icon = "🎉", felt = "neon", mode = "solo", maxPlayers = 8, scoreTarget = 500, handSize = 7, turnTimerSec = 30, rules = [] } = body || {};
+    const {
+      name,
+      icon = "🎉",
+      felt = "neon",
+      mode = "solo",
+      maxPlayers = 8,
+      scoreTarget = 500,
+      handSize = 7,
+      turnTimerSec = 30,
+      rules = [],
+      players = [],
+    } = body || {};
     if (!name) return json(400, { error: "name is required" });
+    const lenErr = checkLength({ name: [name, 64], icon: [icon, 8], felt: [felt, 32] });
+    if (lenErr) return lenErr;
     const room = await withTransaction(async (client) => {
       const roomResult = await client.query(
         `
@@ -325,6 +361,23 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ slu
         `INSERT INTO room_players (room_id, user_id, team, is_ready, is_host) VALUES ($1,$2,'A',TRUE,TRUE)`,
         [roomResult.rows[0].id, user.id],
       );
+      const botPlayers = Array.isArray(players)
+        ? players.filter((p: any) => p?.isBot).slice(0, Math.max(0, Number(maxPlayers) - 1))
+        : [];
+      for (let i = 0; i < botPlayers.length; i += 1) {
+        const bot = botPlayers[i];
+        const botName = String(bot.name || `Bot ${i + 1}`).slice(0, 64);
+        const botAvatar = String(bot.av || "🤖").slice(0, 8);
+        const botColor = String(bot.bg || "#7b5cff").slice(0, 16);
+        const createdBot = await client.query(
+          `INSERT INTO users (username, avatar_emoji, avatar_color) VALUES ($1,$2,$3) RETURNING id`,
+          [botName, botAvatar, botColor],
+        );
+        await client.query(
+          `INSERT INTO room_players (room_id, user_id, team, is_ready, is_host) VALUES ($1,$2,$3,TRUE,FALSE)`,
+          [roomResult.rows[0].id, createdBot.rows[0].id, bot.team || null],
+        );
+      }
       for (const rule of rules) {
         await client.query(`INSERT INTO room_rules (room_id, rule_id, is_enabled) VALUES ($1,$2,$3)`, [
           roomResult.rows[0].id,
@@ -336,7 +389,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ slu
         ...roomResult.rows[0],
         host_name: user.username,
         host_avatar: user.avatar_emoji,
-        player_count: 1,
+        player_count: 1 + botPlayers.length,
         active_rules: rules.filter((r: any) => !!r.on).length,
       };
     });
@@ -373,21 +426,78 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ slu
     const normalizedPlayerId =
       !playerId || playerId === "me" ? user.id : typeof playerId === "string" ? playerId : user.id;
     const actorPlayerId = isUuid(normalizedPlayerId) ? normalizedPlayerId : user.id;
+    console.info(API_MOVES_DEBUG_PREFIX, "incoming", {
+      roomId,
+      type,
+      userId: user.id,
+      playerId,
+      normalizedPlayerId,
+      actorPlayerId,
+    });
     const output = await withTransaction(async (client) => {
       const membership = await getRoomMembership(client, roomId, user.id);
       if (!membership) return { status: 403, body: { error: "forbidden", message: "Only room members can submit moves" } };
-      if ((type === "play" || type === "draw") && actorPlayerId !== user.id) {
-        return { status: 403, body: { error: "forbidden", message: "Cannot submit moves for another player" } };
-      }
       const gameResult = await client.query(
         `SELECT id, state_json FROM games WHERE room_id = $1 ORDER BY updated_at DESC LIMIT 1`,
         [roomId],
       );
       let gameState = gameResult.rowCount ? gameResult.rows[0].state_json : null;
       if (!gameState) {
-        const players = await getRoomPlayersForEngine(client, roomId);
+        // If the host is starting a room that has only themselves, auto-add any
+        // bot players that were configured in the client UI but never persisted
+        // to the DB (happens when starting from an existing-room URL).
+        let configuredBotNames: Set<string> | undefined;
+        if (type === "init" && Array.isArray(roomConfig?.players)) {
+          const existingPlayerIds = await client.query(
+            `SELECT user_id FROM room_players WHERE room_id = $1`,
+            [roomId],
+          );
+          const existingSet = new Set(existingPlayerIds.rows.map((r: any) => r.user_id));
+          const configBots = (roomConfig.players as any[]).filter(
+            (p) => p?.isBot && typeof p.name === "string",
+          );
+          configuredBotNames = new Set(configBots.map((b: any) => String(b.name || "").trim()));
+          for (const bot of configBots) {
+            const botName = String(bot.name || "Bot").slice(0, 64);
+            const botAvatar = String(bot.av || "🤖").slice(0, 8);
+            const botColor = String(bot.bg || "#7b5cff").slice(0, 16);
+            // Only add if no bot with this name already exists in room to avoid
+            // duplicates on repeated Start Game presses.
+            const nameExists = await client.query(
+              `SELECT rp.user_id FROM room_players rp
+               JOIN users u ON u.id = rp.user_id
+               WHERE rp.room_id = $1 AND u.username = $2 LIMIT 1`,
+              [roomId, botName],
+            );
+            if (nameExists.rowCount) continue;
+            const createdBot = await client.query(
+              `INSERT INTO users (username, avatar_emoji, avatar_color)
+               VALUES ($1,$2,$3) RETURNING id`,
+              [botName, botAvatar, botColor],
+            );
+            const botId = createdBot.rows[0].id;
+            if (!existingSet.has(botId)) {
+              await client.query(
+                `INSERT INTO room_players (room_id, user_id, team, is_ready, is_host)
+                 VALUES ($1,$2,$3,TRUE,FALSE) ON CONFLICT DO NOTHING`,
+                [roomId, botId, bot.team || null],
+              );
+            }
+          }
+        }
+
+        const players = await getRoomPlayersForEngine(client, roomId, configuredBotNames);
         if (!players.length) {
           return { status: 404, body: { error: "room not found" } };
+        }
+        if (players.length < 2) {
+          return {
+            status: 400,
+            body: {
+              error: "not_enough_players",
+              message: "A game needs at least 2 players. Add an opponent or a bot in Room Setup.",
+            },
+          };
         }
         const roomResult = await client.query(
           `SELECT mode, hand_size, score_target FROM rooms WHERE id = $1 LIMIT 1`,
@@ -417,14 +527,44 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ slu
       }
       if (!gameState) return { status: 404, body: { error: "game not initialized" } };
       const currentPlayer = gameState.players?.[gameState.currentPlayerIndex];
-      if ((type === "play" || type === "draw") && currentPlayer?.id !== user.id) {
-        return { status: 403, body: { error: "forbidden", message: "Not your turn for this room state" } };
+      if (type === "play" || type === "draw") {
+        const isSelfMove = actorPlayerId === user.id;
+        const isCurrentTurnActor = currentPlayer?.id === actorPlayerId;
+        const isHostDrivingBot = Boolean(membership.is_host) && !isSelfMove && Boolean(currentPlayer?.isBot);
+        if (!isCurrentTurnActor) {
+          console.warn(API_MOVES_DEBUG_PREFIX, "rejected-not-current-actor", {
+            roomId,
+            type,
+            userId: user.id,
+            actorPlayerId,
+            currentPlayerId: currentPlayer?.id,
+          });
+          return { status: 403, body: { error: "forbidden", message: "Not this player's turn" } };
+        }
+        if (!isSelfMove && !isHostDrivingBot) {
+          console.warn(API_MOVES_DEBUG_PREFIX, "rejected-actor-mismatch", {
+            roomId,
+            type,
+            userId: user.id,
+            actorPlayerId,
+            currentPlayerId: currentPlayer?.id,
+            currentIsBot: Boolean(currentPlayer?.isBot),
+            isHost: Boolean(membership.is_host),
+          });
+          return { status: 403, body: { error: "forbidden", message: "Cannot submit moves for another player" } };
+        }
       }
       let moveResult: any = { success: true, gameState };
       if (type === "play") moveResult = Engine.playCard(gameState, actorPlayerId, cardId, chosenColor);
       else if (type === "draw") moveResult = Engine.drawCard(gameState, actorPlayerId);
       if (!moveResult.success) return { status: 400, body: moveResult };
       const nextState = moveResult.gameState;
+      console.info(API_MOVES_DEBUG_PREFIX, "applied", {
+        roomId,
+        type,
+        actorPlayerId,
+        nextCurrentPlayerId: nextState?.players?.[nextState?.currentPlayerIndex]?.id,
+      });
       if (gameResult.rowCount) {
         await client.query(
           `UPDATE games SET state_json = $1, status = $2, updated_at = NOW() WHERE id = $3`,
@@ -443,6 +583,12 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ slu
       );
       return { status: 200, body: moveResult };
     });
+    console.info(API_MOVES_DEBUG_PREFIX, "outgoing", {
+      roomId,
+      type,
+      status: output.status,
+      error: (output.body as any)?.error || null,
+    });
     return json(output.status, output.body);
   }
 
@@ -451,6 +597,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ slu
     if (!user) return json(401, { error: "unauthorized", message: "Bearer token is required" });
     const { name, emoji = "✨", color = "wild", effect, trigger = "onPlay" } = body || {};
     if (!name || !effect) return json(400, { error: "name and effect are required" });
+    const lenErr = checkLength({ name: [name, 64], emoji: [emoji, 8], effect: [effect, 255], trigger: [trigger, 32] });
+    if (lenErr) return lenErr;
     const result = await query(
       `
         INSERT INTO custom_cards (name, emoji, color, effect_text, trigger_rule, created_by_user_id)
@@ -500,6 +648,37 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ slu
 
 export async function DELETE(req: NextRequest, { params }: { params: Promise<{ slug: string[] }> }) {
   const slug = (await params).slug || [];
+  if (slug.length === 2 && slug[0] === "results") {
+    const user: any = await requireAuthUser(req);
+    if (!user) return json(401, { error: "unauthorized", message: "Bearer token is required" });
+    const resultId = slug[1];
+    if (!isUuid(resultId)) return invalidUuid("resultId");
+    const payload = await withTransaction(async (client) => {
+      const resultRow = await client.query(
+        `SELECT id, room_id, created_by_user_id FROM game_results WHERE id = $1 LIMIT 1`,
+        [resultId],
+      );
+      if (!resultRow.rowCount) return { status: 404, body: { error: "result not found" } };
+      const row = resultRow.rows[0];
+      const isOwner = row.created_by_user_id === user.id;
+      let isRoomHost = false;
+      if (!isOwner) {
+        const membership = await getRoomMembership(client, row.room_id, user.id);
+        isRoomHost = Boolean(membership?.is_host);
+      }
+      if (!isOwner && !isRoomHost) {
+        return {
+          status: 403,
+          body: { error: "forbidden", message: "Only room host or result owner can delete this game result" },
+        };
+      }
+      await client.query(`DELETE FROM player_results WHERE game_result_id = $1`, [resultId]);
+      const deleted = await client.query(`DELETE FROM game_results WHERE id = $1 RETURNING id`, [resultId]);
+      if (!deleted.rowCount) return { status: 404, body: { error: "result not found" } };
+      return { status: 200, body: { ok: true, id: deleted.rows[0].id } };
+    });
+    return json(payload.status, payload.body);
+  }
   if (slug.length === 2 && slug[0] === "rooms") {
     const user: any = await requireAuthUser(req);
     if (!user) return json(401, { error: "unauthorized", message: "Bearer token is required" });

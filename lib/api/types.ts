@@ -14,6 +14,7 @@ export interface RoomRule {
 export interface RoomSummary {
   id: string;
   code?: string;
+  hostUserId?: string;
   name: string;
   icon?: string;
   felt?: string;

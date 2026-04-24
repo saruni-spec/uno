@@ -488,6 +488,15 @@ body {
   padding-top: 12px;
   border-top: 2px dashed rgba(255, 255, 255, 0.1);
 }
+.rc-delete-row {
+  margin-top: 10px;
+  display: flex;
+  justify-content: flex-end;
+}
+.rc-delete-btn {
+  position: relative;
+  z-index: 2;
+}
 .avstack {
   display: flex;
 }
@@ -866,6 +875,12 @@ body {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+.rule-row .rr-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
 }
 .rule-row .rr-desc {
   color: var(--ink-dim);
@@ -2255,4 +2270,253 @@ body {
 
 .card-glow {
   animation: glow 1.5s ease-in-out infinite;
+}
+
+/* ----- Room setup (responsive) ----- */
+.room-setup-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+}
+.room-setup-actions {
+  margin-top: 18px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+.room-chip-truncate {
+  max-width: min(52vw, 280px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ----- Guest waiting for host (full-screen game) ----- */
+.wait-host-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px 16px;
+  padding-bottom: max(24px, env(safe-area-inset-bottom, 0px));
+}
+.wait-host-card {
+  max-width: 400px;
+  text-align: center;
+  background: rgba(10, 4, 24, 0.78);
+  border: 2px solid rgba(255, 255, 255, 0.12);
+  border-radius: 20px;
+  padding: 28px 20px;
+}
+.wait-host-title {
+  margin: 0 0 8px;
+}
+.wait-host-copy {
+  margin: 0 0 16px;
+  color: var(--ink-dim, #b8a6d9);
+  line-height: 1.5;
+}
+.wait-host-room {
+  margin-bottom: 20px;
+}
+
+@media (max-width: 768px) {
+  .room-setup-grid {
+    grid-template-columns: 1fr;
+  }
+  .page .panel {
+    padding: 16px;
+  }
+}
+
+/* ----- Game table: mobile layout (single-screen, no scroll) ----- */
+@media (max-width: 720px) {
+  /* Table fills viewport, top->bottom: chrome | opponents | play | hand */
+  .table-wrap {
+    display: flex;
+    flex-direction: column;
+  }
+  .felt-inner {
+    display: grid;
+    grid-template-rows: auto 1fr auto;
+    height: 100%;
+  }
+
+  /* --- Top chrome: single row, truncates so nothing wraps --- */
+  .table-top-chrome {
+    gap: 6px;
+    padding: 8px 10px;
+    padding-top: max(8px, env(safe-area-inset-top, 0px));
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    flex-wrap: nowrap;
+  }
+  .table-top-chrome::-webkit-scrollbar { display: none; }
+  .table-top-chrome .chip {
+    font-size: 11px;
+    padding: 3px 8px;
+    flex-shrink: 0;
+    max-width: 40vw;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .table-top-chrome .room-chip-truncate {
+    max-width: 32vw;
+  }
+
+  /* --- Opponents: compact horizontal row, no fake card fans --- */
+  .opponents {
+    flex-wrap: nowrap;
+    justify-content: space-around;
+    padding: 8px 8px 4px;
+    gap: 6px;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+  .opponents::-webkit-scrollbar { display: none; }
+  .opponent {
+    gap: 2px;
+    flex-shrink: 0;
+  }
+  /* Hide the fake card fan — too tall on phones, count chip is enough */
+  .opponent .op-hand {
+    display: none;
+  }
+  .opponent .op-name-tag {
+    padding: 4px 8px;
+    font-size: 11px;
+    gap: 4px;
+  }
+  .opponent .op-name-tag .av {
+    width: 18px;
+    height: 18px;
+    font-size: 11px;
+  }
+  .opponent .op-cards-count {
+    position: static;
+    width: 22px;
+    height: 22px;
+    font-size: 12px;
+    border-width: 2px;
+  }
+
+  /* --- Play area: stays horizontal, smaller cards --- */
+  .play-area {
+    gap: 10px;
+    padding: 4px 8px;
+    min-height: 0;
+  }
+  .card.lg {
+    width: 88px;
+    height: 126px;
+    border-radius: 14px;
+  }
+  .card.lg .num { font-size: 56px; }
+  .card.lg .corner { font-size: 14px; }
+  .card.lg .symbol { font-size: 42px; }
+  .deck-stack-wrap {
+    width: 96px;
+    height: 134px;
+  }
+  .direction-indicator {
+    font-size: 32px;
+    text-shadow: 2px 2px 0 #0a0418;
+  }
+  .centered-col .chip {
+    font-size: 10px;
+    padding: 2px 6px;
+  }
+
+  /* --- Player hand: ALWAYS visible, pinned at bottom --- */
+  .player-area {
+    padding: 6px 8px max(8px, env(safe-area-inset-bottom, 0px));
+    gap: 6px;
+  }
+  .player-bar {
+    gap: 6px;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+  .player-bar .chip {
+    font-size: 11px;
+    padding: 3px 8px;
+  }
+  /* Default: fan-style overlap for normal hands (≤8 cards) */
+  .hand {
+    padding-top: 18px;
+    padding-bottom: 4px;
+    min-height: 0;
+    justify-content: center;
+    padding-left: 10px;
+    padding-right: 10px;
+    gap: 0;
+  }
+  .hand .card-button {
+    margin-left: -38px;
+    transition: transform 0.15s ease;
+  }
+  .hand .card-button:first-child {
+    margin-left: 0;
+  }
+  .hand .card-button:focus-visible,
+  .hand .card-button:active {
+    transform: translateY(-14px);
+    z-index: 10;
+  }
+  .hand .card-button:hover {
+    transform: translateY(-10px);
+    z-index: 5;
+  }
+  .hand .card {
+    width: 76px;
+    height: 112px;
+    border-radius: 12px;
+    border-width: 2.5px;
+  }
+  .hand .card .num { font-size: 46px; }
+  .hand .card .corner { font-size: 12px; }
+  .hand .card .symbol { font-size: 36px; }
+
+  /* 9+ cards: switch to wrapped grid with smaller, fully-readable cards */
+  .hand:has(> .card-button:nth-child(9)) {
+    flex-wrap: wrap;
+    row-gap: 6px;
+    gap: 4px;
+    padding-top: 6px;
+  }
+  .hand:has(> .card-button:nth-child(9)) .card-button {
+    margin-left: 0;
+  }
+  .hand:has(> .card-button:nth-child(9)) .card {
+    width: 60px;
+    height: 88px;
+    border-width: 2px;
+  }
+  .hand:has(> .card-button:nth-child(9)) .card .num { font-size: 34px; }
+  .hand:has(> .card-button:nth-child(9)) .card .corner { font-size: 10px; }
+  .hand:has(> .card-button:nth-child(9)) .card .symbol { font-size: 26px; }
+
+  /* 13+ cards: even tighter grid */
+  .hand:has(> .card-button:nth-child(13)) .card {
+    width: 52px;
+    height: 76px;
+    border-radius: 9px;
+  }
+  .hand:has(> .card-button:nth-child(13)) .card .num { font-size: 28px; }
+}
+
+/* Very small phones: tighten further */
+@media (max-width: 380px) {
+  .card.lg { width: 76px; height: 110px; }
+  .deck-stack-wrap { width: 84px; height: 118px; }
+  .hand .card { width: 68px; height: 100px; }
+  .hand .card .num { font-size: 40px; }
+  .hand .card-button { margin-left: -34px; }
+  .hand:has(> .card-button:nth-child(9)) .card {
+    width: 54px;
+    height: 80px;
+  }
 }

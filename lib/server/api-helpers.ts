@@ -2,7 +2,14 @@ import jwt from "jsonwebtoken";
 import type { NextRequest } from "next/server";
 import { query } from "./db";
 
-export const JWT_SECRET = process.env.JWT_SECRET || "dev-only-change-me";
+const JWT_SECRET_DEFAULT = "dev-only-change-me";
+if (!process.env.JWT_SECRET && process.env.NODE_ENV === "production") {
+  // Forged tokens are trivially possible with a known public secret.
+  throw new Error("JWT_SECRET environment variable is required in production.");
+} else if (!process.env.JWT_SECRET) {
+  console.warn("[auth] JWT_SECRET not set — using insecure default. Set JWT_SECRET before deploying.");
+}
+export const JWT_SECRET = process.env.JWT_SECRET || JWT_SECRET_DEFAULT;
 export const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || "7d";
 
 export function randomCode(length = 8): string {
@@ -16,6 +23,7 @@ export function toClientRoom(row: Record<string, unknown>) {
   return {
     id: row.id,
     code: row.code,
+    hostUserId: row.host_user_id,
     name: row.name,
     icon: row.icon,
     felt: row.felt_theme,
