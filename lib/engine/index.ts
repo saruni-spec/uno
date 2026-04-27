@@ -137,7 +137,19 @@ export const Engine = {
       case "wild":
         break;
       case "7":
-        if (rules.sevenZero) newState.pendingSwap = true;
+        if (rules.sevenZero && newState.players.length >= 2) {
+          const pIdx = newState.currentPlayerIndex;
+          const tgtIdx = this.nextPlayerIndex(
+            pIdx,
+            newState.players.length,
+            newState.direction,
+          );
+          const hands = newState.players.map((p) => [...p.hand]);
+          const tmp = hands[pIdx];
+          hands[pIdx] = hands[tgtIdx];
+          hands[tgtIdx] = tmp;
+          newState.players = newState.players.map((p, i) => ({ ...p, hand: hands[i] }));
+        }
         break;
       case "0":
         if (rules.sevenZero) {

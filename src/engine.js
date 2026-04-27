@@ -168,10 +168,23 @@ const Engine = {
         break;
 
       case "7":
-        // 7-0 swap rule
-        if (rules.sevenZero) {
-          // Mark for swap action (handled by UI)
-          newState.pendingSwap = true;
+        // 7-0 rule: swap this player's hand with the next player in turn order.
+        // (With 2 players that is the only opponent — same as a full swap.)
+        if (rules.sevenZero && newState.players.length >= 2) {
+          const pIdx = newState.currentPlayerIndex;
+          const tgtIdx = this.nextPlayerIndex(
+            pIdx,
+            newState.players.length,
+            newState.direction,
+          );
+          const hands = newState.players.map((p) => [...p.hand]);
+          const tmp = hands[pIdx];
+          hands[pIdx] = hands[tgtIdx];
+          hands[tgtIdx] = tmp;
+          newState.players = newState.players.map((p, i) => ({
+            ...p,
+            hand: hands[i],
+          }));
         }
         break;
 

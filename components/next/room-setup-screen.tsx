@@ -55,7 +55,11 @@ function isUuid(value: string): boolean {
 
 const RULE_LABELS: Array<{ id: keyof RoomRules; label: string; hint: string }> = [
   { id: "stack", label: "Stack +2/+4", hint: "Allow chaining draw penalties." },
-  { id: "sevenZero", label: "7-0 rule", hint: "7 swaps hands, 0 rotates hands." },
+  {
+    id: "sevenZero",
+    label: "7-0 rule",
+    hint: "7 swaps your hand with the next player in turn order; 0 passes every hand around the table.",
+  },
   { id: "jumpIn", label: "Jump-in", hint: "Play identical card out of turn." },
   { id: "challenge", label: "Challenge wild +4", hint: "Challenge illegal wild +4 plays." },
   { id: "drawPlay", label: "Draw to play", hint: "Play immediately after drawing." },
