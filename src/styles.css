@@ -1111,6 +1111,16 @@ body {
   display: grid;
   gap: 6px;
 }
+.next-round-row {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+.next-round-pending-chip {
+  font-size: 15px;
+  padding: 10px 18px;
+}
 .deck-stack-wrap:hover .card {
   transition: transform 0.18s cubic-bezier(0.2, 0.8, 0.3, 1);
 }
@@ -1209,6 +1219,46 @@ body {
   display: flex;
   align-items: center;
   gap: 12px;
+}
+.taunt-btn {
+  border-color: rgba(123, 92, 255, 0.6);
+  color: #d8ccff;
+}
+.taunt-btn:hover:not(:disabled) {
+  background: rgba(123, 92, 255, 0.18);
+}
+.taunt-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.taunt-picker {
+  margin-top: 2px;
+  display: grid;
+  gap: 6px;
+  width: min(420px, 92vw);
+  background: rgba(10, 4, 24, 0.9);
+  border: 2px solid rgba(123, 92, 255, 0.45);
+  border-radius: 12px;
+  padding: 8px;
+}
+.taunt-option {
+  border: 1.5px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--ink);
+  border-radius: 10px;
+  padding: 8px 10px;
+  text-align: left;
+  font-family: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+.taunt-option:hover {
+  background: rgba(123, 92, 255, 0.2);
+  border-color: rgba(123, 92, 255, 0.6);
+}
+.taunt-option-random {
+  text-align: center;
+  font-weight: 700;
 }
 .hand {
   display: flex;

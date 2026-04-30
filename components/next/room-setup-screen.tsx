@@ -36,6 +36,7 @@ type RoomRules = {
   noMercy: boolean;
   points: boolean;
   noSpecialFinish: boolean;
+  taunts: boolean;
 };
 
 const DEFAULT_RULES: RoomRules = {
@@ -47,6 +48,7 @@ const DEFAULT_RULES: RoomRules = {
   noMercy: true,
   points: true,
   noSpecialFinish: true,
+  taunts: true,
 };
 
 function isUuid(value: string): boolean {
@@ -66,6 +68,7 @@ const RULE_LABELS: Array<{ id: keyof RoomRules; label: string; hint: string }> =
   { id: "noMercy", label: "No mercy", hint: "Keep pressure with aggressive penalties." },
   { id: "points", label: "Score mode", hint: "Track points across hands." },
   { id: "noSpecialFinish", label: "No special finish", hint: "Can't win on action/wild card." },
+  { id: "taunts", label: "Taunts", hint: "Enable player and AI taunt messages." },
 ];
 
 export function RoomSetupScreen({ roomId }: { roomId: string }) {

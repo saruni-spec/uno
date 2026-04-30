@@ -19,12 +19,39 @@ import { loadRoomConfig } from "../../lib/game/session";
 import { Sounds } from "../../lib/game/sounds";
 import { Card, Confetti } from "./primitives";
 
+const PLAYER_TAUNTS = [
+  "Your move.",
+  "Can you beat that?",
+  "Let's see what you got.",
+  "Pressure is on.",
+  "I'm just warming up.",
+];
+
+const AI_SPECIAL_TAUNTS = [
+  "Boom. Special card.",
+  "Didn't see that coming, huh?",
+  "Table just got messy.",
+  "That's how we do it.",
+  "Play around that.",
+];
+
+const AI_PENALTY_TAUNTS = [
+  "That draw had to hurt.",
+  "Cards for days.",
+  "You'll recover... maybe.",
+  "Penalty served.",
+];
+
+function pickTaunt(lines: string[]): string {
+  return lines[Math.floor(Math.random() * lines.length)] || "...";
+}
+
 const FALLBACK_CONFIG: InitGameConfig = {
   roomId: "demo-room",
   mode: "solo",
   targetScore: 500,
   handSize: 7,
-  rules: { stack: true, drawPlay: false, sevenZero: true, noSpecialFinish: true },
+  rules: { stack: true, drawPlay: false, sevenZero: true, noSpecialFinish: true, taunts: true },
   players: [
     { id: "me", name: "You", isBot: false, team: null },
     { id: "ai-1", name: "Bot", isBot: true, difficulty: "normal", team: null },
@@ -59,12 +86,14 @@ export function GameScreen({ roomId }: { roomId: string }) {
   const [syncStatus, setSyncStatus] = useState<"local" | "connecting" | "live">("local");
   const [waitingForHost, setWaitingForHost] = useState(false);
   const [nextRoundPending, setNextRoundPending] = useState(false);
+  const [showTauntPicker, setShowTauntPicker] = useState(false);
   // UNO state: "idle" | "must-shout" (played down to 1, not shouted yet) | "shouted"
   const [unoState, setUnoState] = useState<"idle" | "must-shout" | "shouted">("idle");
   // ID of the card currently mid-play animation so we can apply the fly-out CSS class
   const [playingCardId, setPlayingCardId] = useState<string | null>(null);
   // Stable ref for latest game state so bot effect never reads stale values.
   const gameRef = useRef<GameState | null>(null);
+  const lastTauntAtRef = useRef<number>(0);
   // Timestamp of last local move — poll results arriving within 1.5 s are ignored
   // to prevent the optimistic state from flickering back to old server state.
   const lastLocalMoveAt = useRef<number>(0);
@@ -250,6 +279,13 @@ export function GameScreen({ roomId }: { roomId: string }) {
     saveActiveMatch(roomId, game);
   }, [roomId, game]);
 
+  useEffect(() => {
+    const currentId = game?.players?.[game.currentPlayerIndex]?.id;
+    if (!game || game.phase !== "playing" || currentId !== meId) {
+      setShowTauntPicker(false);
+    }
+  }, [game, meId]);
+
   const meIndex = useMemo(() => {
     if (!game) return -1;
     const idx = game.players.findIndex((p) => p.id === meId);
@@ -258,10 +294,20 @@ export function GameScreen({ roomId }: { roomId: string }) {
   }, [game, meId, backendActive]);
   const me = meIndex >= 0 ? (game?.players[meIndex] ?? null) : null;
   const current = game?.players[game.currentPlayerIndex];
+  const tauntsEnabled = (game?.rules as Record<string, unknown> | undefined)?.taunts !== false;
 
   const pushToast = useCallback((text: string) => {
     setToasts((prev) => [text, ...prev].slice(0, 3));
   }, []);
+
+  const pushTaunt = useCallback((speaker: string, text: string, force = false) => {
+    if (!tauntsEnabled) return;
+    const now = Date.now();
+    // Anti-spam: max one taunt every 2.8s unless forced.
+    if (!force && now - lastTauntAtRef.current < 2800) return;
+    lastTauntAtRef.current = now;
+    pushToast(`${speaker}: ${text}`);
+  }, [pushToast, tauntsEnabled]);
 
   const advanceTurn = useCallback((state: GameState) => {
     return {
@@ -428,6 +474,18 @@ export function GameScreen({ roomId }: { roomId: string }) {
     pushToast("UNO!");
   };
 
+  const onManualTaunt = () => {
+    if (!game || !current || current.id !== meId || game.phase !== "playing") return;
+    setShowTauntPicker((prev) => !prev);
+  };
+
+  const onPickTaunt = (line: string) => {
+    if (!game || !current || current.id !== meId || game.phase !== "playing") return;
+    const speaker = game.players.find((p) => p.id === meId)?.name || "You";
+    pushTaunt(speaker, line, true);
+    setShowTauntPicker(false);
+  };
+
   const nextRound = async () => {
     setUnoState("idle");
 
@@ -493,6 +551,9 @@ export function GameScreen({ roomId }: { roomId: string }) {
         );
         pushToast(`${player.name} drew ${count} card${count > 1 ? "s" : ""}`);
         Sounds.draw();
+        if (count > 1) {
+          pushTaunt(player.name, pickTaunt(AI_PENALTY_TAUNTS));
+        }
         nextState = advanceTurn({
           ...latest,
           players: nextPlayers,
@@ -517,6 +578,9 @@ export function GameScreen({ roomId }: { roomId: string }) {
         if (botCard.color === "wild") Sounds.wild();
         else if (["skip", "reverse", "draw2"].includes(botCard.value)) Sounds.skip();
         else Sounds.play();
+        if (botCard.color === "wild" || ["skip", "reverse", "draw2", "wild4"].includes(botCard.value)) {
+          pushTaunt(player.name, pickTaunt(AI_SPECIAL_TAUNTS));
+        }
         const winner = Engine.checkWinner(nextState, player.id);
         if (winner.isWinner) {
           setGame(settleWinner(nextState, player.id));
@@ -559,7 +623,7 @@ export function GameScreen({ roomId }: { roomId: string }) {
     return () => {
       cancelled = true;
     };
-  }, [game, backendActive, roomId, advanceTurn, settleWinner, pushToast]);
+  }, [game, backendActive, roomId, advanceTurn, settleWinner, pushToast, pushTaunt]);
 
   if (waitingForHost) {
     return (
@@ -655,6 +719,23 @@ export function GameScreen({ roomId }: { roomId: string }) {
           <div className="player-area">
             <div className="player-bar">
               <span className="chip">Score: {scores[meId] || 0}</span>
+              {game.phase === "playing" ? (
+                <button
+                  className="btn ghost sm taunt-btn"
+                  onClick={onManualTaunt}
+                  disabled={current.id !== meId || !tauntsEnabled}
+                  aria-label="Send taunt"
+                  title={
+                    !tauntsEnabled
+                      ? "Taunts are muted in room rules"
+                      : current.id === meId
+                        ? "Open taunt picker"
+                        : "Taunt on your turn"
+                  }
+                >
+                  💬 Taunt
+                </button>
+              ) : null}
               {unoState === "must-shout" ? (
                 <button className="btn uno-btn-shout" onClick={onShoutUno} aria-label="Say UNO">
                   UNO!
@@ -675,10 +756,31 @@ export function GameScreen({ roomId }: { roomId: string }) {
                 </button>
               ))}
             </div>
+            {showTauntPicker && game.phase === "playing" && current.id === meId && tauntsEnabled ? (
+              <div className="taunt-picker" aria-label="Taunt picker">
+                {PLAYER_TAUNTS.map((line) => (
+                  <button
+                    key={line}
+                    type="button"
+                    className="taunt-option"
+                    onClick={() => onPickTaunt(line)}
+                  >
+                    {line}
+                  </button>
+                ))}
+                <button
+                  type="button"
+                  className="taunt-option taunt-option-random"
+                  onClick={() => onPickTaunt(pickTaunt(PLAYER_TAUNTS))}
+                >
+                  🎲 Random
+                </button>
+              </div>
+            ) : null}
             {game.phase === "finished" ? (
-              <div className="mt-12" style={{ display: "flex", gap: 10, flexWrap: "wrap", justifyContent: "center" }}>
+              <div className="mt-12 next-round-row">
                 {nextRoundPending ? (
-                  <span className="chip" style={{ fontSize: 15, padding: "10px 18px" }}>
+                  <span className="chip next-round-pending-chip">
                     ⏳ Starting next round…
                   </span>
                 ) : (
